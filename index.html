@@ -11096,13 +11096,31 @@ function collapseAllVillages() {
 
     async function readExcelData(arrayBuffer) {
         try {
-            // ✅ cellDates:true → วันที่เป็น JS Date, raw:true → ตัวเลขเป็น number จริง
-            const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+            // ✅ cellDates: false ป้องกัน SheetJS สลับวันกับเดือน (US date format: MM/DD/YYYY issue)
+            // raw: true เพื่อรักษาความบริสุทธิ์ของตัวเลข (CID, HN, รหัสต่างๆ ไม่ถูกแปลงเพี้ยน)
+            const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false, raw: true });
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
-            // ✅ raw:true เพื่อรักษา type: Date, number, string ตามจริง
             const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true, defval: '' });
-            // ✅ ไม่แปลงทุกอย่างเป็น string ที่นี่ — ปล่อย import function จัดการ type แต่ละ column
+            
+            // ✅ ดึง cell.w (formatted text เช่น วันที่ใน Excel "2026-01-12" หรือ "12/01/2026") มารักษาความถูกต้อง
+            if (worksheet && worksheet['!ref']) {
+                const range = XLSX.utils.decode_range(worksheet['!ref']);
+                for (let R = range.s.r; R <= range.e.r; ++R) {
+                    if (!rawRows[R]) rawRows[R] = [];
+                    for (let C = range.s.c; C <= range.e.c; ++C) {
+                        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                        const cell = worksheet[cellAddress];
+                        if (cell) {
+                            if (cell.w && typeof cell.w === 'string' && /[\/\-\.\s]/.test(cell.w.trim())) {
+                                rawRows[R][C] = cell.w.trim();
+                            } else if (rawRows[R][C] === undefined || rawRows[R][C] === null) {
+                                rawRows[R][C] = cell.v !== undefined ? cell.v : '';
+                            }
+                        }
+                    }
+                }
+            }
             return rawRows;
         } catch (error) {
             throw new Error('ไม่สามารถอ่านข้อมูลจากไฟล์ได้: ' + error.message);
@@ -17578,19 +17596,36 @@ window.switchLogTab = function(tab) {
     window.sendTomorrowApptsToTelegram = sendTomorrowApptsToTelegram;
 
     function parseThaiDateToISO(thaiDateStr) {
-        if (!thaiDateStr) return null;
+        if (!thaiDateStr && thaiDateStr !== 0) return null;
+
+        // 0. รองรับ Excel serial number (เช่น 46034 ซึ่งคือ 2026-01-12)
+        if (typeof thaiDateStr === 'number' || (typeof thaiDateStr === 'string' && /^\d{5}$/.test(thaiDateStr.trim()))) {
+            const num = Number(thaiDateStr);
+            if (num >= 25569 && num <= 80000) { // อยู่ระหว่างปี 1970 ถึง 2119
+                const epoch = new Date(Date.UTC(1899, 11, 30));
+                const d = new Date(epoch.getTime() + Math.round(num) * 86400000);
+                const y = d.getUTCFullYear();
+                const m = d.getUTCMonth() + 1;
+                const day = d.getUTCDate();
+                return y + '-' + String(m).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+            }
+        }
+
+        // 1. กรณีเป็น Date object
         if (thaiDateStr instanceof Date) {
             if (isNaN(thaiDateStr.getTime())) return null;
-            let y = thaiDateStr.getFullYear();
-            let m = thaiDateStr.getMonth() + 1;
-            let d = thaiDateStr.getDate();
+            const adjusted = new Date(thaiDateStr.getTime() + 5 * 60 * 1000);
+            let y = adjusted.getFullYear();
+            let m = adjusted.getMonth() + 1;
+            let d = adjusted.getDate();
             if (y > 2400) y -= 543;
-            return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
         }
+
         const s = String(thaiDateStr).trim();
         if (!s || s === '-' || s === '0' || s === 'undefined' || s === 'null') return null;
 
-        // 1. รูปแบบ ISO: YYYY-MM-DD
+        // 2. รูปแบบ ISO: YYYY-MM-DD หรือ YYYY/MM/DD
         const isoM = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
         if (isoM) {
             let y = parseInt(isoM[1], 10);
@@ -17598,11 +17633,23 @@ window.switchLogTab = function(tab) {
             let d = parseInt(isoM[3], 10);
             if (y > 2400) y -= 543;
             if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-                return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
             }
         }
 
-        // 2. รูปแบบ DD/MM/YYYY หรือ MM/DD/YYYY
+        // 3. รูปแบบ 8 หลักติดกัน: YYYYMMDD เช่น 20260112 หรือ 25690112
+        const ymd8 = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+        if (ymd8) {
+            let y = parseInt(ymd8[1], 10);
+            let m = parseInt(ymd8[2], 10);
+            let d = parseInt(ymd8[3], 10);
+            if (y > 2400) y -= 543;
+            if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+                return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+            }
+        }
+
+        // 4. รูปแบบ DD/MM/YYYY หรือ DD-MM-YYYY (มาตรฐานไทย วัน/เดือน/ปี)
         const ddmmyyyy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
         if (ddmmyyyy) {
             let p1 = parseInt(ddmmyyyy[1], 10);
@@ -17613,18 +17660,17 @@ window.switchLogTab = function(tab) {
 
             let d = p1;
             let m = p2;
-            // ถ้า p1 > 12 -> p1 คือวัน, p2 คือเดือน (DD/MM/YYYY)
-            // ถ้า p2 > 12 -> p2 คือวัน, p1 คือเดือน (MM/DD/YYYY)
+            // กรณี US format: ถ้า p2 > 12 และ p1 <= 12 แสดงว่า p2 คือวัน, p1 คือเดือน (MM/DD/YYYY)
             if (p2 > 12 && p1 <= 12) {
                 m = p1;
                 d = p2;
             }
             if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-                return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
             }
         }
 
-        // 3. รูปแบบข้อความภาษาไทย เช่น "9 ธ.ค. 2569" หรือ "09 ธันวาคม 2569"
+        // 5. รูปแบบข้อความภาษาไทย เช่น "9 ธ.ค. 2569" หรือ "12 มกราคม 2569"
         const thaiMonths = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.', 
                             'มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
         let parts = s.split(/\s+/);
@@ -17637,12 +17683,12 @@ window.switchLogTab = function(tab) {
                 let m = (mIdx % 12) + 1;
                 if (y > 2400) y -= 543;
                 if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-                    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
                 }
             }
         }
 
-        // 4. JS Date parse fallback
+        // 6. JS Date parse fallback
         const parsed = new Date(s);
         if (!isNaN(parsed.getTime())) {
             let y = parsed.getFullYear();
@@ -17650,12 +17696,13 @@ window.switchLogTab = function(tab) {
             let m = parsed.getMonth() + 1;
             let d = parsed.getDate();
             if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1900 && y <= 2100) {
-                return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
             }
         }
 
         return null;
     }
+    window.parseThaiDateToISO = parseThaiDateToISO;
 
     function ensureApptManageModal() {
         if (document.getElementById('manageApptModal')) return;
