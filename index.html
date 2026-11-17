@@ -6427,7 +6427,7 @@
                 const s = filters.search.toLowerCase();
                 children = children.filter(c => 
                     (c.fullname && c.fullname.toLowerCase().includes(s)) ||
-                    (c.cid && c.cid.toLowerCase().includes(s)) ||
+                    (c.cid && String(c.cid).toLowerCase().includes(s)) ||
                     (c.hn && c.hn.toLowerCase().includes(s))
                 );
             }
@@ -7665,14 +7665,67 @@
                 records.push(obj);
             }
 
-            for (let c = 0; c < records.length; c += 100) {
-                const chunk = records.slice(c, c + 100);
-                const { error } = await supabaseClient.from('data').upsert(chunk);
+            // ✅ ตัดข้อมูลซ้ำในไฟล์ที่นำเข้า และรวมข้อมูลฟิลด์ที่สมบูรณ์ที่สุด (True Upsert)
+            const cleanMap = new Map();
+            records.forEach(r => {
+                const cid = String(r.CID || '').trim();
+                const hn = String(r.HN || '').trim();
+                const hc = String(r.hcode || '').trim();
+                const key = cid ? ('CID_' + cid) : (hc && hn ? ('HN_' + hc + '_' + hn) : null);
+                if (!key) return;
+                if (!cleanMap.has(key)) {
+                    cleanMap.set(key, r);
+                } else {
+                    const existing = cleanMap.get(key);
+                    Object.keys(r).forEach(k => {
+                        const nv = r[k];
+                        const ev = existing[k];
+                        if ((ev === null || ev === undefined || ev === '' || ev === '-') && (nv !== null && nv !== undefined && nv !== '' && nv !== '-')) {
+                            existing[k] = nv;
+                        }
+                    });
+                }
+            });
+            const cleanRecords = Array.from(cleanMap.values());
+            if (cleanRecords.length === 0) {
+                return { success: false, message: 'ไม่พบรายการข้อมูลที่สมบูรณ์สำหรับนำเข้า' };
+            }
+
+            // ✅ ลบข้อมูลเดิมของเด็กที่มีอยู่แล้วในฐานข้อมูล เพื่ออัปเดตเป็นข้อมูลชุดล่าสุด (ป้องกันข้อมูลซ้ำซ้อน)
+            const cidsToDelete = cleanRecords.filter(r => r.CID).map(r => r.CID);
+            for (let c = 0; c < cidsToDelete.length; c += 200) {
+                const cidChunk = cidsToDelete.slice(c, c + 200);
+                try {
+                    await supabaseClient.from('data').delete().in('CID', cidChunk);
+                } catch(eDel) {
+                    console.warn('delete CID chunk error:', eDel);
+                }
+            }
+            const hnOnlyRecords = cleanRecords.filter(r => !r.CID && r.hcode && r.HN);
+            for (const r of hnOnlyRecords) {
+                try {
+                    await supabaseClient.from('data').delete().match({ hcode: r.hcode, HN: r.HN });
+                } catch(eDelHn) {}
+            }
+
+            // ✅ แทรกข้อมูลที่อัปเดตและตัดซ้ำแล้วลงตาราง data
+            for (let c = 0; c < cleanRecords.length; c += 100) {
+                const chunk = cleanRecords.slice(c, c + 100);
+                const { error } = await supabaseClient.from('data').insert(chunk);
                 if (error) {
-                    console.error('Import data error:', error);
+                    console.error('Import data insert error:', error);
                     return { success: false, message: 'นำเข้าข้อมูลเด็กไม่สำเร็จ: ' + (error.message || 'กรุณาตรวจสอบสิทธิ์ RLS ใน Supabase') };
                 }
             }
+
+            // ✅ เคลียร์แคชรายงานทั้งหมดในระบบ เพื่อให้รายงานแสดงผลจากฐานข้อมูลล่าสุดทันที
+            if (typeof APP !== 'undefined' && APP) {
+                APP.coverageData = null;
+            }
+            window.DTP_RAW_CHILDREN = null;
+            window.PCV_RAW_CHILDREN = null;
+            window.DTP_CACHE = null;
+            window.PCV_CACHE = null;
 
             try {
                 const logHcode = userHcode || (records[0] ? records[0].hcode : '-') || '-';
@@ -7825,11 +7878,42 @@
                 records.push(obj);
             }
 
-            for (let c = 0; c < records.length; c += 100) {
-                const chunk = records.slice(c, c + 100);
-                const { error } = await supabaseClient.from('appoint').upsert(chunk);
+            // ✅ ตัดข้อมูลนัดหมายซ้ำในไฟล์ที่นำเข้า
+            const cleanApptMap = new Map();
+            records.forEach(r => {
+                const cid = String(r.CID || '').trim();
+                const hn = String(r.HN || '').trim();
+                const hc = String(r.hcode || '').trim();
+                const apptDate = String(r.appointdate || '').trim();
+                const vacCode = String(r.vaccinecode || '').trim();
+                const key = cid 
+                    ? ('CID_' + cid + '_' + apptDate + '_' + vacCode) 
+                    : (hc && hn ? ('HN_' + hc + '_' + hn + '_' + apptDate + '_' + vacCode) : null);
+                if (!key) return;
+                if (!cleanApptMap.has(key)) {
+                    cleanApptMap.set(key, r);
+                } else {
+                    const existing = cleanApptMap.get(key);
+                    Object.assign(existing, r);
+                }
+            });
+            const cleanApptRecords = Array.from(cleanApptMap.values());
+
+            // ✅ ลบข้อมูลนัดหมายเดิมตาม CID
+            const apptCids = cleanApptRecords.filter(r => r.CID).map(r => r.CID);
+            for (let c = 0; c < apptCids.length; c += 200) {
+                const cidChunk = apptCids.slice(c, c + 200);
+                try {
+                    await supabaseClient.from('appoint').delete().in('CID', cidChunk);
+                } catch(eApptDel) {}
+            }
+
+            // ✅ แทรกข้อมูลนัดหมายชุดใหม่
+            for (let c = 0; c < cleanApptRecords.length; c += 100) {
+                const chunk = cleanApptRecords.slice(c, c + 100);
+                const { error } = await supabaseClient.from('appoint').insert(chunk);
                 if (error) {
-                    console.error('Import appoint error:', error);
+                    console.error('Import appoint insert error:', error);
                     return { success: false, message: 'นำเข้าข้อมูลนัดหมายไม่สำเร็จ: ' + (error.message || 'กรุณาตรวจสอบสิทธิ์ RLS ใน Supabase') };
                 }
             }
@@ -8647,26 +8731,57 @@
         }
 
         if (fnName === 'getChildDetail') {
-            const childId = String(args[0] || '').trim();
-            if (!childId) return { success: false, message: 'ไม่ระบุรหัสเด็ก' };
-
-            let q = supabaseClient.from('data').select('*');
-            const cleanId = childId.replace(/\D/g, '');
-            if (cleanId.length >= 5) {
-                q = q.or(`CID.eq.${cleanId},HN.eq.${cleanId}`);
-            } else if (cleanId.length > 0) {
-                q = q.eq('HN', cleanId);
+            const rawInput = args[0];
+            let childId = '';
+            if (rawInput && typeof rawInput === 'object') {
+                childId = String(rawInput.id || rawInput.cid || rawInput.hn || rawInput.fullname || '').trim();
+            } else {
+                childId = String(rawInput || '').trim();
             }
-            let { data, error } = await q.limit(5);
-            if (error || !data || data.length === 0) {
-                const all = await fetchAllFromTable('data');
-                const matched = all.find(r => {
-                    const rId = String(r.CID || r.cid || r.id || r['เลขบัตร'] || '').trim();
-                    const rHn = String(r.HN || r.hn || '').trim();
-                    return rId === childId || rHn === childId;
-                });
-                if (!matched) return { success: false, message: 'ไม่พบข้อมูลเด็กในระบบ' };
-                data = [matched];
+            if (!childId || childId === '-' || childId === 'undefined' || childId === 'null') {
+                return { success: false, message: 'ไม่ระบุรายการเด็ก' };
+            }
+
+            const cleanDigits = childId.replace(/\D/g, '');
+            let data = null;
+
+            // 1. เธเนเธเธซเธฒเธ”เนเธงเธข CID (13 เธซเธฅเธฑเธ)
+            if (cleanDigits.length === 13) {
+                try {
+                    const { data: byCid, error: cidErr } = await supabaseClient.from('data').select('*').eq('CID', cleanDigits).limit(1);
+                    if (!cidErr && byCid && byCid.length > 0) data = byCid;
+                } catch(e) {}
+            }
+
+            // 2. เธเนเธเธซเธฒเธ”เนเธงเธข HN (เธ•เธฑเธงเน€เธฅเธ 1-10 เธซเธฅเธฑเธ)
+            if (!data && cleanDigits.length > 0 && cleanDigits.length <= 10) {
+                try {
+                    const { data: byHn, error: hnErr } = await supabaseClient.from('data').select('*').eq('HN', cleanDigits).limit(1);
+                    if (!hnErr && byHn && byHn.length > 0) data = byHn;
+                } catch(e) {}
+            }
+
+            // 3. เธเนเธเธซเธฒเธ”เนเธงเธข CID เธซเธฃเธทเธญ HN (or query)
+            if (!data && cleanDigits.length > 0) {
+                try {
+                    const { data: byOr, error: orErr } = await supabaseClient.from('data').select('*').or(CID.eq.$cleanDigits,HN.eq.$cleanDigits).limit(1);
+                    if (!orErr && byOr && byOr.length > 0) data = byOr;
+                } catch(e) {}
+            }
+
+            // 4. เธเนเธเธซเธฒเธ”เนเธงเธขเธเธทเนเธญ-เธชเธเธธเธฅ (fullname ilike)
+            if (!data && childId.length >= 2) {
+                try {
+                    const cleanName = childId.replace(/[\'\"\%\_]/g, '').trim();
+                    if (cleanName) {
+                        const { data: byName, error: nameErr } = await supabaseClient.from('data').select('*').ilike('fullname', %%$cleanName%%).limit(1);
+                        if (!nameErr && byName && byName.length > 0) data = byName;
+                    }
+                } catch(e) {}
+            }
+
+            if (!data || data.length === 0) {
+                return { success: false, message: 'ไม่พบข้อมูลเด็กในระบบ' };
             }
 
             const raw = data[0];
@@ -8841,16 +8956,22 @@
             const rawFilter = (typeof args[0] === 'object' && args[0] !== null) ? args[0] : {};
             const userHcode = rawFilter.hcode || rawFilter.userHcode || args[1] || '';
 
-            // ✅ รายงานความครอบคลุมวัคซีนเกณฑ์กระทรวง นับเฉพาะเด็กในเขต Type = 1, 3
-            const allChildren = await fetchAllFromTable('data', '*');
+            // ✅ ดึงข้อมูลตรงจากฐานข้อมูล Supabase (กรองเฉพาะสถานพยาบาลที่เลือก เพื่อความรวดเร็วและลดโหลด)
+            const targetHcode = (userHcode && userHcode !== 'ทั้งหมด' && userHcode !== '-- ทั้งหมด --') 
+                ? userHcode 
+                : (rawFilter.role === 'Admin_HOS' ? rawFilter.userHcode : null);
+            const covFilterBuilder = targetHcode ? (q) => {
+                const unpH = String(targetHcode).replace(/^0+/, '');
+                const padH = String(targetHcode).padStart(5, '0');
+                return q.or(`hcode.eq.${targetHcode},hcode.eq.${unpH},hcode.eq.${padH}`);
+            } : null;
+
+            const allChildren = await fetchAllFromTable('data', '*', covFilterBuilder);
             const inAreaChildren = allChildren.filter(isInAreaChild);
 
             let targetChildren = inAreaChildren;
-            if (userHcode && userHcode !== 'ทั้งหมด' && userHcode !== '-- ทั้งหมด --') {
-                const unpH = String(userHcode).replace(/^0+/, '');
-                targetChildren = targetChildren.filter(c => String(c.hcode || '').trim().replace(/^0+/, '') === unpH);
-            } else if (rawFilter.role === 'Admin_HOS' && rawFilter.userHcode) {
-                const unpH = String(rawFilter.userHcode).replace(/^0+/, '');
+            if (targetHcode) {
+                const unpH = String(targetHcode).replace(/^0+/, '');
                 targetChildren = targetChildren.filter(c => String(c.hcode || '').trim().replace(/^0+/, '') === unpH);
             }
 
@@ -12474,20 +12595,31 @@ function updateBottomNavActive(page) {
     }
 
     window.viewChildFromMap = async function(childId) {
-    showLoading('กำลังโหลดข้อมูล...');
-    
-    
-    // ✅ Audit Log — ดูข้อมูลเด็ก
-    logActivity('VIEW', 'view', `ดูรายละเอียดเด็ก ID: ${childId}`);
-    
-    try {
-        const result = await callGAS('getChildDetail', [childId]);
+        if (!childId || childId === '-' || childId === '0') {
+            return Swal.fire('ผิดพลาด', 'ไม่พบรหัสเด็กสำหรับการแสดงผล', 'error');
+        }
+
+        const cached = window.CHILD_DETAIL_MAP && (window.CHILD_DETAIL_MAP[String(childId).trim()]);
+        
+        showLoading('กำลังโหลดข้อมูล...');
+        logActivity('VIEW', 'view', $msgAudit ${childId});
+        
+        try {
+            const result = await callGAS('getChildDetail', [childId]);
             hideLoading();
-            if (!result.success) return Swal.fire('ผิดพลาด', result.message, 'error');
+            if (!result.success) {
+                if (cached) {
+                    return showChildDetail(cached);
+                }
+                return Swal.fire('ผิดพลาด', result.message || 'ไม่พบข้อมูลเด็กในระบบ', 'error');
+            }
             const c = result.child;
             showChildDetail(c);
         } catch (e) {
             hideLoading();
+            if (cached) {
+                return showChildDetail(cached);
+            }
             Swal.fire('ผิดพลาด', e.message, 'error');
         }
     };
@@ -13024,7 +13156,7 @@ function updateBottomNavActive(page) {
                 '<div><small style="color:#64748b; font-size:12px;">HN</small><div style="font-weight:500;">' + esc(c.hn || '-') + '</div></div>' +
                 '<div><small style="color:#64748b; font-size:12px;">สถานพยาบาล</small><div style="font-weight:600; color:#4f46e5;">' + esc(getFacilityDisplayName(c.hcode, c.hname)) + '</div></div>' +
                 '<div><small style="color:#64748b; font-size:12px;">วันเกิด</small><div style="font-weight:500;">' + formatDate(c.birthDate) + '</div></div>' +
-                '<div><small style="color:#64748b; font-size:12px;">อายุ</small><div style="font-weight:500;">' + esc(c.age) + '</div></div>' +
+                '<div><small style="color:#64748b; font-size:12px;">อายุ</small><div style="font-weight:500;">' + esc(((typeof calculateAgeString === 'function' ? calculateAgeString(c.birthDate || c.dob) : '') || c.age || '-')) + '</div></div>' +
                 '<div style="grid-column:1/-1"><small style="color:#64748b; font-size:12px;">ที่อยู่</small><div style="font-weight:500;">บ้าน ' + esc(c.houseNumber) + ' หมู่ ' + esc(c.village) + '</div></div>' +
                 '<div><small style="color:#64748b; font-size:12px;">โทรศัพท์</small><div style="font-weight:500;">' + phoneHtml + '</div></div>' +
                 '<div><small style="color:#64748b; font-size:12px;">พิกัด GPS</small><div style="font-weight:500;">' + gpsHtml + '</div></div>' +
@@ -13937,7 +14069,15 @@ window.switchLogTab = function(tab) {
                     return `<option value="${s}" ${c.status === s ? 'selected' : ''}>${s}</option>`;
                 }).join('');
 
-                const ageSortVal = parseAgeToMonths(c.age);
+                const targetChildId = (c.id && c.id !== '-' && c.id !== '0') ? c.id : (c.hn && c.hn !== '-' ? c.hn : (c.cid || ''));
+                if (window.CHILD_DETAIL_MAP) {
+                    if (targetChildId) window.CHILD_DETAIL_MAP[String(targetChildId).trim()] = c;
+                    if (c.hn) window.CHILD_DETAIL_MAP[String(c.hn).trim()] = c;
+                    if (c.cid) window.CHILD_DETAIL_MAP[String(c.cid).trim()] = c;
+                }
+                const dynamicAge = (typeof calculateAgeString === 'function') ? calculateAgeString(c.birthDate || c.dob) : '';
+                const displayAge = (dynamicAge && dynamicAge !== '-') ? dynamicAge : (c.age || '-');
+                const ageSortVal = parseAgeToMonths(displayAge);
                 let statusDisplay = '<span class="status-badge ' + getStatusClass(c.status) + '">' + esc(c.status) + '</span>';
                 if (c.status === '\u0E02\u0E32\u0E14\u0E19\u0E31\u0E14' && c.missingVaccines) {
                     statusDisplay += '<div style="font-size: 11px; color: #ef4444; margin-top: 4px; line-height: 1.3; max-width: 200px; white-space: normal;">\u0E02\u0E32\u0E14: ' + esc(c.missingVaccines) + '</div>';
@@ -13951,8 +14091,8 @@ window.switchLogTab = function(tab) {
                 const actionCol = '<div style="white-space:nowrap;">' +
                     quickCallBtn +
                     quickNavBtn +
-                    '<button class="action-btn view" title="\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14" onclick="viewChildFromMap(\'' + esc(c.id || c.hn) + '\')"><i class="fas fa-eye"></i></button> ' +
-                    '<select class="status-select" title="\u0E40\u0E1B\u0E25\u0E35\u0E48\u0E22\u0E19\u0E2A\u0E16\u0E32\u0E19\u0E30" onchange="changeStatus(\'' + esc(c.fullname) + '\',this)" data-childid="' + esc(c.id || c.hn) + '">' +
+                    '<button class="action-btn view" title="\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14" onclick="viewChildFromMap(\'' + esc(targetChildId) + '\')"><i class="fas fa-eye"></i></button> ' +
+                    '<select class="status-select" title="\u0E40\u0E1B\u0E25\u0E35\u0E48\u0E22\u0E19\u0E2A\u0E16\u0E32\u0E19\u0E30" onchange="changeStatus(\'' + esc(c.fullname) + '\',this)" data-childid="' + esc(targetChildId) + '">' +
                     '<option value="">\u0E40\u0E1B\u0E25\u0E35\u0E48\u0E22\u0E19\u0E2A\u0E16\u0E32\u0E19\u0E30</option>' + statusOpts +
                     '</select>' +
                     '</div>';
@@ -13961,7 +14101,7 @@ window.switchLogTab = function(tab) {
                     '<span style="color:#667eea; font-weight:500;">' + esc(displayName) + '</span>',
                     '<span style="font-family:monospace; font-size:13px;">' + esc(c.hn) + '</span>',
                     '<span style="font-weight:500;">' + esc(c.fullname) + '</span>',
-                    '<span data-order="' + ageSortVal + '">' + esc(c.age) + '</span>',
+                    '<span data-order="' + ageSortVal + '">' + esc(displayAge) + '</span>',
                     esc(c.houseNumber),
                     esc(c.village),
                     esc(c.villageName || '-'),
@@ -14562,7 +14702,7 @@ window.switchLogTab = function(tab) {
 
                     const actCol = '<div style="white-space:nowrap; display:flex; align-items:center; gap:4px;">' +
                         '<button class="action-btn" style="background:#e0f2fe; color:#0284c7; border:none; width:30px; height:30px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="ออกวันนัดใหม่ & พิมพ์ใบนัดสำหรับเด็กคนนี้" onclick="openNewAppointmentModalForMissing([\'' + esc(childKey) + '\'])"><i class="far fa-calendar-plus"></i></button> ' +
-                        '<button class="action-btn view" title="\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14" onclick="viewChild(\'' + esc(c.id || c.hn) + '\')"><i class="fas fa-eye"></i></button> ' +
+                        '<button class="action-btn view" title="\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14" onclick="viewChild(\'' + esc((c.id && c.id !== '-' && c.id !== '0') ? c.id : (c.hn && c.hn !== '-' ? c.hn : (c.cid || ''))) + '\')"><i class="fas fa-eye"></i></button> ' +
                         '<select class="status-select" title="\u0E40\u0E1B\u0E25\u0E35\u0E48\u0E22\u0E19\u0E2A\u0E16\u0E32\u0E19\u0E30" onchange="changeStatus(\'' + esc(c.fullname) + '\',this)">' +
                         '<option value="">\u0E40\u0E1B\u0E25\u0E35\u0E48\u0E22\u0E19\u0E2A\u0E16\u0E32\u0E19\u0E30</option>' + statusOpts +
                         '</select>' +
@@ -19874,12 +20014,26 @@ window.switchLogTab = function(tab) {
                  loadImportHistory(true);
              }
     
-                   Swal.fire({
+                // ✅ เคลียร์แคชรายงานทั้งหมด เพื่อให้ผู้ใช้กดประมวลผลใหม่ได้อย่างถูกต้อง
+                if (typeof APP !== 'undefined' && APP) {
+                    APP.coverageData = null;
+                }
+                window.DTP_RAW_CHILDREN = null;
+                window.PCV_RAW_CHILDREN = null;
+                window.DTP_CACHE = null;
+                window.PCV_CACHE = null;
+
+                Swal.fire({
                     icon: 'success',
-                   title: 'สำเร็จ!',
-                    text: response.message || 'นำเข้าข้อมูลเรียบร้อย',
-                    timer: 2500,
-                    showConfirmButton: false
+                    title: 'นำเข้าและอัปเดตข้อมูลสำเร็จ!',
+                    html: `<div style="font-family:Kanit; font-size:14px; text-align:left;">
+                        <p style="margin-bottom:8px;">${esc(response.message || 'นำเข้าและอัปเดตข้อมูลเด็กเรียบร้อย')}</p>
+                        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 12px; color:#166534; font-size:13px;">
+                            <i class="fas fa-info-circle"></i> <b>ข้อแนะนำ:</b> ระบบอัปเดตข้อมูลและตัดข้อมูลซ้ำเรียบร้อยแล้ว กรุณากดปุ่ม <b>"ประมวลผลข้อมูล"</b> ในแต่ละหน้ารายงานเพื่อดูผลลัพธ์ล่าสุดตรงจากฐานข้อมูล
+                        </div>
+                    </div>`,
+                    confirmButtonText: 'ตกลง',
+                    confirmButtonColor: '#10b981'
                 }).then(function() {
 
                     if (fileInput) fileInput.value = '';
@@ -20541,6 +20695,12 @@ window.confirmClearOldAppointments = async function() {
           </div>
         </div>
         <div class="cv-action-btns">
+          <span id="cvLastProcessedBadge" style="font-size:12px; color:#475569; background:#f1f5f9; padding:6px 12px; border-radius:8px; border:1px solid #cbd5e1; display:inline-flex; align-items:center; gap:6px;">
+            <i class="fas fa-clock"></i> ยังไม่ได้ประมวลผล — กรุณากดปุ่ม "ประมวลผลข้อมูล"
+          </span>
+          <button class="cv-btn cv-btn-info" onclick="doLoadCoverage(true)" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; font-weight:600; box-shadow:0 2px 6px rgba(37,99,235,0.3);">
+            <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
+          </button>
           <button class="cv-btn cv-btn-outline" onclick="toggleTrendView()">
             <i class="fas fa-chart-line"></i> เทียบย้อนหลัง
           </button>
@@ -20590,8 +20750,8 @@ window.confirmClearOldAppointments = async function() {
         </div>
         <div class="cv-filter-group">
           <label>&nbsp;</label>
-          <button class="cv-btn-search" onclick="doLoadCoverage()">
-            <i class="fas fa-search"></i> ประมวลผลข้อมูล
+          <button class="cv-btn-search" onclick="doLoadCoverage(true)" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; font-weight:600; box-shadow:0 2px 6px rgba(37,99,235,0.3);">
+            <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
           </button>
         </div>
       </div>
@@ -20619,7 +20779,28 @@ window.confirmClearOldAppointments = async function() {
     <div id="cvTrend" style="display:none"></div>
   `;
 
-  doLoadCoverage();
+  if (APP.coverageData) {
+    const selectedQ = document.getElementById('cvQuarter')?.value || '';
+    renderCoverage(APP.coverageData, selectedQ);
+    const badgeEl = document.getElementById('cvLastProcessedBadge');
+    if (badgeEl && APP.coverageData.processedTime) {
+      badgeEl.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> ประมวลผลล่าสุด: ${APP.coverageData.processedTime} (ตรงจากฐานข้อมูล)`;
+    }
+  } else {
+    document.getElementById('cvSummary').innerHTML = '';
+    document.getElementById('cvTables').innerHTML = `
+      <div style="text-align:center; padding:45px 20px; background:#fff; border-radius:14px; border:2px dashed #cbd5e1; margin-top:16px;">
+        <i class="fas fa-calculator" style="font-size:44px; color:#2563eb; margin-bottom:12px; display:inline-block;"></i>
+        <h4 style="color:#0f172a; margin:0 0 6px 0; font-size:18px; font-weight:700;">พร้อมประมวลผลรายงานความครอบคลุมวัคซีน</h4>
+        <p style="color:#64748b; font-size:13.5px; max-width:520px; margin:0 auto 16px auto;">
+          กรุณากดปุ่ม <b>"ประมวลผลข้อมูล"</b> เพื่อดึงข้อมูลล่าสุดตรงจากฐานข้อมูลและคำนวณความครอบคลุมวัคซีน
+        </p>
+        <button class="cv-btn cv-btn-info" onclick="doLoadCoverage(true)" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; padding:10px 24px; font-size:14px; border-radius:8px; font-weight:600; box-shadow:0 2px 6px rgba(37,99,235,0.3);">
+          <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
+        </button>
+      </div>
+    `;
+  }
 }
 
 function onCvYearTypeChange() {
@@ -20654,7 +20835,10 @@ function onCvQuarterChange() {
   }
 }
 
-async function doLoadCoverage() {
+async function doLoadCoverage(forceRefresh = false) {
+  if (forceRefresh && typeof APP !== 'undefined') {
+    APP.coverageData = null;
+  }
   const u = APP.currentUser || {};
   
   
@@ -20699,9 +20883,15 @@ async function doLoadCoverage() {
         `<div class="alert alert-danger">${(res && res.message) || 'โหลดข้อมูลไม่สำเร็จ'}</div>`;
       return;
     }
+    const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' เธ.';
+    res.processedTime = nowStr;
     APP.coverageData = res;
     const selectedQ = document.getElementById('cvQuarter')?.value || '';
     renderCoverage(res, selectedQ);
+    const badgeEl = document.getElementById('cvLastProcessedBadge');
+    if (badgeEl) {
+      badgeEl.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธฅเนเธฒเธชเธธเธ”: ${nowStr} (เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ)`;
+    }
   } catch (err) {
     document.getElementById('cvTables').innerHTML =
       `<div class="alert alert-danger">เกิดข้อผิดพลาด: ${esc(err.message)}</div>`;
@@ -22409,9 +22599,12 @@ async function loadDuplicateReportPage() {
                     <option value="มีสถานะปฏิเสธ">⛔ มีสถานพยาบาลที่บันทึก "ปฏิเสธ"</option>
                 </select>
             </div>
-            <div class="filter-actions">
-                <button class="btn-filter" id="dupSearchBtn">
-                    <i class="fas fa-search"></i> ค้นหา
+            <div class="filter-actions" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span id="dupLastProcessedBadge" style="font-size:12px; color:#475569; background:#f1f5f9; padding:6px 12px; border-radius:8px; border:1px solid #cbd5e1; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fas fa-clock"></i> ยังไม่ได้ประมวลผล
+                </span>
+                <button class="btn-filter" id="dupSearchBtn" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; font-weight:600;">
+                    <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
                 </button>
                 <button class="btn-reset" id="dupResetBtn">
                     <i class="fas fa-undo"></i> รีเซ็ต
@@ -22496,6 +22689,12 @@ async function doLoadDuplicateReport() {
 
         DUP_DATA = result.duplicateChildren || [];
         DUP_SUMMARY = result.summary || {};
+
+        const dupNowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
+        const dupBadge = document.getElementById('dupLastProcessedBadge');
+        if (dupBadge) {
+            dupBadge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> ประมวลผลล่าสุด: ${dupNowStr} (ตรงจากฐานข้อมูล)`;
+        }
 
         renderDuplicateSummary(DUP_SUMMARY);
         renderDuplicateTable(DUP_DATA);
@@ -23051,7 +23250,7 @@ async function doOutOfAreaChildSearch() {
                     '<td style="white-space:nowrap;">' +
                         quickCallBtn +
                         quickNavBtn +
-                        '<button class="action-btn view" title="รายละเอียดประวัติวัคซีน" onclick="viewChildFromMap(\'' + esc(c.id || c.hn) + '\')"><i class="fas fa-eye"></i></button> ' +
+                        '<button class="action-btn view" title="รายละเอียดประวัติวัคซีน" onclick="viewChildFromMap(\'' + esc((c.id && c.id !== '-' && c.id !== '0') ? c.id : (c.hn && c.hn !== '-' ? c.hn : (c.cid || ''))) + '\')"><i class="fas fa-eye"></i></button> ' +
                         '<select class="status-select" title="เปลี่ยนสถานะ" onchange="changeStatus(\'' + esc(c.fullname) + '\',this)" data-childid="' + esc(c.id || c.hn) + '">' +
                             '<option value="">เปลี่ยนสถานะ</option>' + statusOpts +
                         '</select>' +
@@ -23228,9 +23427,12 @@ async function loadPcvTargetPage() {
                     <div class="page-title" style="margin-bottom:4px;"><i class="fas fa-syringe" style="color:#0284c7;"></i> รายงานกลุ่มเป้าหมายวัคซีน PCV</div>
                     <div style="color:#64748b; font-size:13px;">เด็กที่เกิดตั้งแต่วันที่ 1 ตุลาคม 2568 เป็นต้นมา ตามแผนงานสร้างเสริมภูมิคุ้มกันโรค กระทรวงสาธารณสุข (ตารางมาตรฐานแบบ 2p+1: อายุ 2, 4 และ 12 เดือน)</div>
                 </div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button id="pcvRefreshBtn" class="btn" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:8px 14px; border-radius:8px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-                        <i class="fas fa-sync-alt"></i> รีเฟรช
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <span id="pcvLastProcessedBadge" style="font-size:12px; color:#475569; background:#f1f5f9; padding:6px 12px; border-radius:8px; border:1px solid #cbd5e1; display:inline-flex; align-items:center; gap:6px;">
+                        <i class="fas fa-clock"></i> ยังไม่ได้ประมวลผล
+                    </span>
+                    <button id="pcvProcessBtn" class="btn" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(2,132,199,0.25);">
+                        <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
                     </button>
                     <button id="pcvPrintBtn" class="btn" style="background:#f8fafc; color:#0284c7; border:1px solid #bae6fd; padding:8px 14px; border-radius:8px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px;" onclick="window.print()">
                         <i class="fas fa-print"></i> พิมพ์
@@ -23422,15 +23624,39 @@ async function loadPcvTargetPage() {
             </div>
         `;
 
-        await fetchAndRenderPcvData();
+        if (window.PCV_RAW_CHILDREN && window.PCV_RAW_CHILDREN.length > 0) {
+            updatePcvStats(window.PCV_RAW_CHILDREN);
+            filterAndDisplayPcvTable();
+            const badge = document.getElementById('pcvLastProcessedBadge');
+            if (badge && window.PCV_PROCESSED_TIME) {
+                badge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> ประมวลผลล่าสุด: ${window.PCV_PROCESSED_TIME} (ตรงจากฐานข้อมูล)`;
+            }
+        } else {
+            const tbody = document.getElementById('pcvTableBody');
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="13" style="text-align:center; padding:45px 20px; color:#64748b;">
+                            <i class="fas fa-syringe" style="font-size:36px; color:#0284c7; margin-bottom:12px; display:inline-block;"></i>
+                            <div style="font-size:16px; font-weight:700; color:#1e293b; margin-bottom:6px;">พร้อมประมวลผลรายงานกลุ่มเป้าหมายวัคซีน PCV</div>
+                            <div style="font-size:13px; color:#64748b; margin-bottom:16px;">กรุณากดปุ่ม <b>"ประมวลผลข้อมูล"</b> เพื่อดึงข้อมูลรายชื่อเด็กตรวจสอบวัคซีน PCV ล่าสุดตรงจากฐานข้อมูล</div>
+                            <button class="btn" onclick="fetchAndRenderPcvData(true)" style="background:#0284c7; color:white; border:none; padding:9px 20px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px;">
+                                <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
 
         // Bind filter event listeners
         const facEl = document.getElementById('pcvFacility');
-        if (facEl) facEl.addEventListener('change', fetchAndRenderPcvData);
-        document.getElementById('pcvType').addEventListener('change', fetchAndRenderPcvData);
+        if (facEl) facEl.addEventListener('change', () => fetchAndRenderPcvData(true));
+        document.getElementById('pcvType').addEventListener('change', () => fetchAndRenderPcvData(true));
         document.getElementById('pcvStatus').addEventListener('change', filterAndDisplayPcvTable);
         document.getElementById('pcvSearch').addEventListener('input', debounce(filterAndDisplayPcvTable, 300));
-        document.getElementById('pcvRefreshBtn').addEventListener('click', fetchAndRenderPcvData);
+        const pcvProcBtn = document.getElementById('pcvProcessBtn');
+        if (pcvProcBtn) pcvProcBtn.addEventListener('click', () => fetchAndRenderPcvData(true));
         document.getElementById('pcvExportBtn').addEventListener('click', exportPcvExcel);
 
     } catch (err) {
@@ -23441,8 +23667,11 @@ async function loadPcvTargetPage() {
     }
 }
 
-async function fetchAndRenderPcvData() {
-    showLoading('กำลังโหลดรายชื่อเด็กเป้าหมาย PCV...');
+async function fetchAndRenderPcvData(forceRefresh = false) {
+    if (forceRefresh) {
+        window.PCV_RAW_CHILDREN = null;
+    }
+    showLoading('กำลังประมวลผลรายชื่อเด็กเป้าหมาย PCV ตรงจากฐานข้อมูล...');
     try {
         const facEl = document.getElementById('pcvFacility');
         const isAdminAmpur = isAdminAmpurUser();
@@ -23474,6 +23703,13 @@ async function fetchAndRenderPcvData() {
             PCV_RAW_CHILDREN = list;
         } else {
             PCV_RAW_CHILDREN = [];
+        }
+
+        const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
+        window.PCV_PROCESSED_TIME = nowStr;
+        const pcvBadge = document.getElementById('pcvLastProcessedBadge');
+        if (pcvBadge) {
+            pcvBadge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> ประมวลผลล่าสุด: ${nowStr} (ตรงจากฐานข้อมูล)`;
         }
 
         updatePcvStats(PCV_RAW_CHILDREN);
@@ -23934,9 +24170,12 @@ async function loadDtpReportPage() {
                         ระบบเฝ้าระวัง ติดตาม และเร่งรัดความครอบคลุมวัคซีนคอตีบ (DTP-HB-Hib และ DTP) อำเภอเทพา ตามเกณฑ์สร้างเสริมภูมิคุ้มกันโรค สธ. ปี 2569
                     </div>
                 </div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button id="dtpRefreshBtn" class="btn" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:8px 14px; border-radius:8px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-                        <i class="fas fa-sync-alt"></i> รีเฟรช
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <span id="dtpLastProcessedBadge" style="font-size:12px; color:#475569; background:#f1f5f9; padding:6px 12px; border-radius:8px; border:1px solid #cbd5e1; display:inline-flex; align-items:center; gap:6px;">
+                        <i class="fas fa-clock"></i> ยังไม่ได้ประมวลผล
+                    </span>
+                    <button id="dtpProcessBtn" class="btn" style="background:linear-gradient(135deg, #dc2626, #b91c1c); color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(220,38,38,0.25);">
+                        <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
                     </button>
                     <button id="dtpPrintOutreachBtn" class="btn" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; padding:8px 14px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
                         <i class="fas fa-clipboard-list"></i> พิมพ์ใบติดตาม อสม. (ลงพื้นที่)
@@ -24157,17 +24396,42 @@ async function loadDtpReportPage() {
             </div>
         `;
 
-        await fetchAndRenderDtpData();
+        if (window.DTP_RAW_CHILDREN && window.DTP_RAW_CHILDREN.length > 0) {
+            populateDtpVillageDropdown(window.DTP_RAW_CHILDREN);
+            updateDtpStats(window.DTP_RAW_CHILDREN);
+            filterAndDisplayDtpTable();
+            const badge = document.getElementById('dtpLastProcessedBadge');
+            if (badge && window.DTP_PROCESSED_TIME) {
+                badge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธฅเนเธฒเธชเธธเธ”: ${window.DTP_PROCESSED_TIME} (เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ)`;
+            }
+        } else {
+            const tbody = document.getElementById('dtpTableBody');
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="16" style="text-align:center; padding:45px 20px; color:#64748b;">
+                            <i class="fas fa-shield-virus" style="font-size:36px; color:#dc2626; margin-bottom:12px; display:inline-block;"></i>
+                            <div style="font-size:16px; font-weight:700; color:#1e293b; margin-bottom:6px;">เธเธฃเนเธญเธกเธเธฃเธฐเธกเธงเธฅเธเธฅเธฃเธฒเธขเธเธฒเธเน€เธ”เนเธเธเธฒเธ”เธงเธฑเธเธเธตเธเธเธญเธ•เธตเธ</div>
+                            <div style="font-size:13px; color:#64748b; margin-bottom:16px;">เธเธฃเธธเธ“เธฒเธเธ”เธเธธเนเธก <b>"เธเธฃเธฐเธกเธงเธฅเธเธฅเธเนเธญเธกเธนเธฅ"</b> เน€เธเธทเนเธญเธ”เธถเธเธเนเธญเธกเธนเธฅเธฃเธฒเธขเธเธทเนเธญเน€เธ”เนเธเธ•เธฃเธงเธเธชเธญเธเธงเธฑเธเธเธตเธเธเธญเธ•เธตเธเธฅเนเธฒเธชเธธเธ”เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ</div>
+                            <button class="btn" onclick="fetchAndRenderDtpData(true)" style="background:#dc2626; color:white; border:none; padding:9px 20px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px;">
+                                <i class="fas fa-sync-alt"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธเนเธญเธกเธนเธฅ
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
 
         // Bind filter event listeners
         const facEl = document.getElementById('dtpFacility');
-        if (facEl) facEl.addEventListener('change', fetchAndRenderDtpData);
-        document.getElementById('dtpType').addEventListener('change', fetchAndRenderDtpData);
+        if (facEl) facEl.addEventListener('change', () => fetchAndRenderDtpData(true));
+        document.getElementById('dtpType').addEventListener('change', () => fetchAndRenderDtpData(true));
         document.getElementById('dtpVillage').addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpStatus').addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpMissedDose').addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpSearch').addEventListener('input', debounce(filterAndDisplayDtpTable, 300));
-        document.getElementById('dtpRefreshBtn').addEventListener('click', fetchAndRenderDtpData);
+        const dtpProcBtn = document.getElementById('dtpProcessBtn');
+        if (dtpProcBtn) dtpProcBtn.addEventListener('click', () => fetchAndRenderDtpData(true));
         document.getElementById('dtpExportBtn').addEventListener('click', exportDtpExcel);
         document.getElementById('dtpPrintOutreachBtn').addEventListener('click', printDtpOutreachSheet);
 
@@ -24179,8 +24443,11 @@ async function loadDtpReportPage() {
     }
 }
 
-async function fetchAndRenderDtpData() {
-    showLoading('กำลังโหลดรายชื่อเด็กตรวจสอบวัคซีนคอตีบ...');
+async function fetchAndRenderDtpData(forceRefresh = false) {
+    if (forceRefresh) {
+        window.DTP_RAW_CHILDREN = null;
+    }
+    showLoading('กำลังประมวลผลรายชื่อเด็กตรวจสอบวัคซีนคอตีบตรงจากฐานข้อมูล...');
     try {
         const facEl = document.getElementById('dtpFacility');
         const isAdminAmpur = isAdminAmpurUser();
@@ -24215,6 +24482,13 @@ async function fetchAndRenderDtpData() {
 
         // อัปเดตรายการหมู่บ้านใน Dropdown dtpVillage
         populateDtpVillageDropdown(window.DTP_RAW_CHILDREN);
+
+        const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' เธ.';
+        window.DTP_PROCESSED_TIME = nowStr;
+        const dtpBadge = document.getElementById('dtpLastProcessedBadge');
+        if (dtpBadge) {
+            dtpBadge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธฅเนเธฒเธชเธธเธ”: ${nowStr} (เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ)`;
+        }
 
         updateDtpStats(window.DTP_RAW_CHILDREN);
         filterAndDisplayDtpTable();
