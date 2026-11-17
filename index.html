@@ -8764,7 +8764,7 @@
             // 3. เธเนเธเธซเธฒเธ”เนเธงเธข CID เธซเธฃเธทเธญ HN (or query)
             if (!data && cleanDigits.length > 0) {
                 try {
-                    const { data: byOr, error: orErr } = await supabaseClient.from('data').select('*').or(CID.eq.$cleanDigits,HN.eq.$cleanDigits).limit(1);
+                    const { data: byOr, error: orErr } = await supabaseClient.from('data').select('*').or('CID.eq.' + cleanDigits + ',HN.eq.' + cleanDigits).limit(1);
                     if (!orErr && byOr && byOr.length > 0) data = byOr;
                 } catch(e) {}
             }
@@ -8774,7 +8774,7 @@
                 try {
                     const cleanName = childId.replace(/[\'\"\%\_]/g, '').trim();
                     if (cleanName) {
-                        const { data: byName, error: nameErr } = await supabaseClient.from('data').select('*').ilike('fullname', %%$cleanName%%).limit(1);
+                        const { data: byName, error: nameErr } = await supabaseClient.from('data').select('*').ilike('fullname', '%' + cleanName + '%').limit(1);
                         if (!nameErr && byName && byName.length > 0) data = byName;
                     }
                 } catch(e) {}
@@ -12602,7 +12602,7 @@ function updateBottomNavActive(page) {
         const cached = window.CHILD_DETAIL_MAP && (window.CHILD_DETAIL_MAP[String(childId).trim()]);
         
         showLoading('กำลังโหลดข้อมูล...');
-        logActivity('VIEW', 'view', $msgAudit ${childId});
+        logActivity('VIEW', 'view', 'ดูประวัติวัคซีนเด็ก: ' + childId);
         
         try {
             const result = await callGAS('getChildDetail', [childId]);
