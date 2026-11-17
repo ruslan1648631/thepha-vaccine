@@ -6266,24 +6266,50 @@
         // 13. ประวัติกิจกรรม (Activity Logs)
         if (fnName === 'getActivityLogs') {
             const filters = args[0] || {};
-            let query = supabaseClient.from('Activity_Log').select('*').order('created_at', { ascending: false }).limit(400);
+            let query = supabaseClient.from('Activity_Log').select('*').limit(500);
             if (filters.userRole === 'Admin_HOS' && filters.userHcode) {
                 const unp = String(filters.userHcode).replace(/^0+/, '');
                 const pad = String(filters.userHcode).padStart(5, '0');
-                query = query.or(`hcode.eq.${filters.userHcode},hcode.eq.${unp},hcode.eq.${pad}`);
+                const num = Number(unp) || 0;
+                query = query.or(`hcode.eq.${filters.userHcode},hcode.eq.${unp},hcode.eq.${pad},Hcode.eq.${filters.userHcode},Hcode.eq.${unp},Hcode.eq.${pad},Hcode.eq.${num}`);
             }
-            const { data, error } = await query;
-            if (error) throw error;
-            const logs = (data || []).map(l => ({
-                timestamp: formatDateTime(l.created_at || l.timestamp),
-                username: l.username || '-',
-                fullname: l.fullname || l.username || '-',
-                role: l.role || 'เจ้าหน้าที่',
-                hcode: l.hcode || '-',
-                action: l.action || 'GENERAL',
-                category: l.category || 'general',
-                details: l.details || '-'
-            }));
+            
+            let data = null;
+            try {
+                const res = await query.order('created_at', { ascending: false });
+                if (res.error) throw res.error;
+                data = res.data;
+            } catch (ordErr) {
+                try {
+                    const res2 = await query.order('Timestamp', { ascending: false });
+                    if (res2.error) throw res2.error;
+                    data = res2.data;
+                } catch (ordErr2) {
+                    const res3 = await query;
+                    if (res3.error) throw res3.error;
+                    data = res3.data;
+                }
+            }
+
+            const logs = (data || []).map(l => {
+                const rawDate = l.created_at || l.timestamp || l.Timestamp || '';
+                const timeVal = (typeof parseLogTimestamp === 'function') ? parseLogTimestamp(rawDate) : (new Date(rawDate).getTime() || 0);
+                return {
+                    timestamp: formatDateTime(rawDate),
+                    timeVal: timeVal,
+                    username: l.username || l.Username || '-',
+                    fullname: l.fullname || l.Fullname || l.username || l.Username || '-',
+                    role: l.role || l.Role || 'เจ้าหน้าที่',
+                    hcode: l.hcode || l.Hcode || '-',
+                    action: l.action || l.Action || 'GENERAL',
+                    category: (l.category || l.Category || 'general').toLowerCase(),
+                    details: l.details || l.Details || '-'
+                };
+            });
+
+            // เรียงจากล่าสุดไปหลังสุด (Descending)
+            logs.sort((a, b) => (b.timeVal || 0) - (a.timeVal || 0));
+
             return { success: true, logs };
         }
 
@@ -9910,11 +9936,11 @@
             // 1.4 ดึงประวัติการนำเข้าจาก Activity_Log
             const importLogs = [];
             try {
-                const { data: logsData } = await supabaseClient
-                    .from('Activity_Log')
-                    .select('*')
-                    .order('Timestamp', { ascending: false })
-                    .limit(300);
+                let logsData = null;
+                try {
+                    const res = await supabaseClient.from('Activity_Log').select('*').limit(600);
+                    if (res && res.data) logsData = res.data;
+                } catch(e) {}
 
                 if (logsData && logsData.length > 0) {
                     logsData.forEach(item => {
@@ -9930,33 +9956,46 @@
                         const ts = item.Timestamp || item.timestamp || item.created_at || '-';
                         const fn = item.Fullname || item.fullname || '-';
                         const un = item.Username || item.username || '-';
+                        const role = item.Role || item.role || 'เจ้าหน้าที่';
 
                         const isData = (action === 'IMPORT_DATA' || det.includes('data') || det.includes('เด็ก'));
                         const isAppt = (action === 'IMPORT_APPT' || det.includes('appoint') || det.includes('นัด'));
 
+                        const timeVal = (typeof parseLogTimestamp === 'function') ? parseLogTimestamp(ts) : (new Date(ts).getTime() || 0);
+
                         const logObj = {
-                            timestamp: ts,
+                            timestamp: formatDateTime(ts),
+                            timeVal: timeVal,
                             datasetType: isData ? 'data' : 'appointment',
+                            datasetLabel: isData ? 'ข้อมูลเด็ก 0-5 ปี (data)' : 'ข้อมูลนัดหมาย (Appointment)',
                             hcode: pad,
                             facilityName: getFacilityDisplayName(pad, ''),
                             username: un,
                             fullname: fn,
+                            role: role,
                             details: det
                         };
                         importLogs.push(logObj);
+                    });
 
-                        if (pad !== '-') {
-                            const fac = ensureFacility(pad, '');
+                    // เรียงประวัติการนำเข้าจากล่าสุดไปหลังสุด (Descending)
+                    importLogs.sort((a, b) => (b.timeVal || 0) - (a.timeVal || 0));
+
+                    // อัปเดตสถิติล่าสุดของแต่ละสถานพยาบาล
+                    importLogs.forEach(l => {
+                        if (l.hcode !== '-') {
+                            const fac = ensureFacility(l.hcode, '');
                             if (fac) {
                                 fac.totalImports++;
                                 const importInfo = {
-                                    timestamp: ts,
-                                    fullname: fn,
-                                    username: un,
-                                    details: det
+                                    timestamp: l.timestamp,
+                                    timeVal: l.timeVal,
+                                    fullname: l.fullname,
+                                    username: l.username,
+                                    details: l.details
                                 };
-                                if (isData && !fac.lastDataImport) fac.lastDataImport = importInfo;
-                                if (isAppt && !fac.lastApptImport) fac.lastApptImport = importInfo;
+                                if (l.datasetType === 'data' && !fac.lastDataImport) fac.lastDataImport = importInfo;
+                                if (l.datasetType === 'appointment' && !fac.lastApptImport) fac.lastApptImport = importInfo;
                                 if (!fac.lastAnyImport) fac.lastAnyImport = importInfo;
                             }
                         }
@@ -10986,18 +11025,62 @@ function collapseAllVillages() {
         return day + ' ' + thaiMonths[d.getMonth()] + ' ' + y;
     }
 
+    function parseLogTimestamp(val) {
+        if (!val) return 0;
+        if (val instanceof Date) return val.getTime();
+        if (typeof val === 'number') return val;
+        const s = String(val).trim();
+        if (!s || s === '-' || s === '0') return 0;
+
+        // 1. ISO format (e.g. 2026-11-17T14:14:52.000Z)
+        const dIso = new Date(s);
+        if (!isNaN(dIso.getTime()) && s.includes('T')) return dIso.getTime();
+
+        // 2. Thai formatted with month name e.g. '31 ต.ค. 2569 13:46 น.'
+        const thaiMonths = { 'ม.ค.':0, 'ก.พ.':1, 'มี.ค.':2, 'เม.ย.':3, 'พ.ค.':4, 'มิ.ย.':5, 'ก.ค.':6, 'ส.ค.':7, 'ก.ย.':8, 'ต.ค.':9, 'พ.ย.':10, 'ธ.ค.':11 };
+        const thMatch = s.match(/(\d{1,2})\s+([^\s]+)\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (thMatch) {
+            const d = parseInt(thMatch[1], 10);
+            const mStr = thMatch[2];
+            let y = parseInt(thMatch[3], 10);
+            if (y > 2400) y -= 543;
+            const h = thMatch[4] ? parseInt(thMatch[4], 10) : 0;
+            const min = thMatch[5] ? parseInt(thMatch[5], 10) : 0;
+            const sec = thMatch[6] ? parseInt(thMatch[6], 10) : 0;
+            const m = thaiMonths[mStr] !== undefined ? thaiMonths[mStr] : -1;
+            if (m !== -1) {
+                return new Date(y, m, d, h, min, sec).getTime();
+            }
+        }
+
+        // 3. DD/MM/YYYY or DD-MM-YYYY HH:mm:ss
+        const slashMatch = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (slashMatch) {
+            const d = parseInt(slashMatch[1], 10);
+            const m = parseInt(slashMatch[2], 10) - 1;
+            let y = parseInt(slashMatch[3], 10);
+            if (y > 2400) y -= 543;
+            const h = slashMatch[4] ? parseInt(slashMatch[4], 10) : 0;
+            const min = slashMatch[5] ? parseInt(slashMatch[5], 10) : 0;
+            const sec = slashMatch[6] ? parseInt(slashMatch[6], 10) : 0;
+            return new Date(y, m, d, h, min, sec).getTime();
+        }
+
+        if (!isNaN(dIso.getTime())) return dIso.getTime();
+        return 0;
+    }
+
     function formatDateTime(val) {
         if (!val || val === '-' || val === '0') return '-';
-        let d = null;
-        if (val instanceof Date) {
-            d = val;
-        } else if (typeof parseBirthDateSafe === 'function') {
-            d = parseBirthDateSafe(val);
-        } else {
-            d = new Date(val);
+        if (typeof val === 'string' && val.includes('น.') && (val.includes('256') || val.includes('202'))) return val;
+        const ts = (typeof parseLogTimestamp === 'function') ? parseLogTimestamp(val) : 0;
+        if (ts > 0) {
+            const d = new Date(ts);
+            return d.toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' น.';
         }
+        let d = (val instanceof Date) ? val : new Date(val);
         if (d && !isNaN(d.getTime())) {
-            return d.toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            return d.toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' น.';
         }
         return val.toString();
     }
@@ -11730,7 +11813,7 @@ async function warmUpBackend() {
                 { id: 'users', icon: 'fas fa-users-cog', label: 'จัดการผู้ใช้งาน' },
                 { id: 'categories', icon: 'fas fa-map-marker-alt', label: 'จัดการหมู่บ้าน' },
                 { id: 'manageData', icon: 'fas fa-database', label: 'จัดการข้อมูล (นำเข้า/ลบ)' },
-                { id: 'accessLog', icon: 'fas fa-history', label: 'ประวัติการเข้าใช้งาน' },
+                { id: 'accessLog', icon: 'fas fa-history', label: 'ประวัติการใช้งานระบบ' },
                 { sep: 'ข้อมูล' },
                 { id: 'children', icon: 'fas fa-child', label: 'รายชื่อเด็กทั้งหมด' },
                 { id: 'missing', icon: 'fas fa-user-times', label: 'เด็กขาดนัด' },
@@ -13757,76 +13840,34 @@ function updateBottomNavActive(page) {
         if (h) h.disabled = false;
     }
 // ============================================================
-    // ACCESS LOG PAGE (Admin Only)
+    // ACCESS LOG PAGE (Admin Only) - กิจกรรมทั้งหมด เรียงจากล่าสุดไปหลังสุด
     // ============================================================
     async function loadAccessLogPage() {
-    const page = document.getElementById('accessLogPage');
-    page.classList.add('active');
-    showLoading('กำลังโหลดประวัติ...');
+        const page = document.getElementById('accessLogPage');
+        page.classList.add('active');
+        showLoading('กำลังโหลดประวัติกิจกรรม...');
 
-    try {
-        // ✅ โหลดทั้ง 2 อย่าง
-        const [accessRes, activityRes] = await Promise.all([
-            callGAS('getAccessLogs', [APP.currentUser.role, APP.currentUser.hcode]),
-            callGAS('getActivityLogs', [{
+        try {
+            const activityRes = await callGAS('getActivityLogs', [{
                 userRole: APP.currentUser.role,
                 userHcode: APP.currentUser.hcode
-            }])
-        ]);
+            }]);
 
-        hideLoading();
+            hideLoading();
 
-        const accessLogs = accessRes.success ? accessRes.logs : [];
-        const activityLogs = activityRes.success ? activityRes.logs : [];
+            const activityLogs = (activityRes && activityRes.success) ? activityRes.logs : [];
 
-        page.innerHTML = `
-            <div class="page-title">
-                <i class="fas fa-history"></i> ประวัติการใช้งานระบบ
-            </div>
+            // เรียงลำดับจากล่าสุดไปหลังสุด (Descending)
+            activityLogs.sort((a, b) => (b.timeVal || 0) - (a.timeVal || 0));
 
-            <!-- Tabs -->
-            <div class="filter-bar" style="padding: 0; overflow: hidden;">
-                <div style="display: flex; width: 100%;">
-                    <button id="tabAccess" onclick="switchLogTab('access')"
-                            style="flex: 1; padding: 16px; border: none; background: #667eea; color: #fff;
-                                   font-family: Kanit; font-size: 14px; font-weight: 600; cursor: pointer;">
-                        <i class="fas fa-sign-in-alt"></i> ประวัติเข้าใช้งาน (${accessLogs.length})
-                    </button>
-                    <button id="tabActivity" onclick="switchLogTab('activity')"
-                            style="flex: 1; padding: 16px; border: none; background: #f1f5f9; color: #475569;
-                                   font-family: Kanit; font-size: 14px; font-weight: 600; cursor: pointer;">
-                        <i class="fas fa-clipboard-list"></i> กิจกรรมทั้งหมด (${activityLogs.length})
-                    </button>
+            page.innerHTML = `
+                <div class="page-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
+                    <div><i class="fas fa-history"></i> ประวัติการใช้งานระบบ</div>
+                    <div style="font-size:14px; font-weight:500; color:#475569; background:#f8fafc; padding:6px 16px; border-radius:20px; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:6px;">
+                        <i class="fas fa-clipboard-list" style="color:#667eea;"></i> กิจกรรมทั้งหมด <b>${activityLogs.length}</b> รายการ
+                    </div>
                 </div>
-            </div>
 
-            <!-- Tab 1: Access Log -->
-            <div id="tabContentAccess">
-                <div class="data-table" style="width:100%; overflow-x:auto;">
-                    <table id="accessLogTable" class="display nowrap" style="width:100%;">
-                        <thead><tr>
-                            <th>วัน-เวลา</th>
-                            <th>ชื่อผู้ใช้</th>
-                            <th>ชื่อ-สกุล</th>
-                            <th>ตำแหน่ง</th>
-                            <th>สถานพยาบาล</th>
-                        </tr></thead>
-                        <tbody>
-                            ${accessLogs.map(l => `
-                                <tr>
-                                    <td>${esc(l.timestamp)}</td>
-                                    <td><span style="font-weight:500;">${esc(l.username)}</span></td>
-                                    <td>${esc(l.fullname)}</td>
-                                    <td><span class="role-badge ${getRoleClass(l.role)}">${esc(l.role)}</span></td>
-                                    <td><span style="color:#667eea; font-weight:500;">${esc(getFacilityDisplayName(l.hcode))}</span></td>
-                                </tr>`).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Tab 2: Activity Log -->
-            <div id="tabContentActivity" style="display: none;">
                 <div class="data-table" style="width:100%; overflow-x:auto;">
                     <table id="activityLogTable" class="display nowrap" style="width:100%;">
                         <thead><tr>
@@ -13845,13 +13886,14 @@ function updateBottomNavActive(page) {
                                     view: { bg: '#e0f2fe', color: '#0369a1', icon: 'fa-eye' },
                                     edit: { bg: '#fef3c7', color: '#b45309', icon: 'fa-edit' },
                                     print: { bg: '#ede9fe', color: '#6d28d9', icon: 'fa-print' },
+                                    import: { bg: '#dcfce7', color: '#15803d', icon: 'fa-file-import' },
                                     general: { bg: '#f1f5f9', color: '#475569', icon: 'fa-circle' }
                                 };
                                 const c = catColors[l.category] || catColors.general;
 
                                 return `
                                     <tr>
-                                        <td style="white-space:nowrap; font-size:12px;">${esc(l.timestamp)}</td>
+                                        <td data-order="${l.timeVal || 0}" style="white-space:nowrap; font-size:12px;">${esc(l.timestamp)}</td>
                                         <td>
                                              <div style="font-weight:500;">${esc(l.fullname)}</div>
                                              <div style="font-size:11px; color:#94a3b8;">${esc(l.username)}</div>
@@ -13878,46 +13920,23 @@ function updateBottomNavActive(page) {
                         </tbody>
                     </table>
                 </div>
-            </div>
-        `;
+            `;
 
-        // Init DataTables
-        if (accessLogs.length > 0) {
-            initDT('accessLogTable', { scrollX: true, autoWidth: false, order: [] });
+            // กำหนดให้ DataTables เรียงคอลัมน์ 0 (วัน-เวลา) จากมากไปน้อย (ล่าสุด -> หลังสุด) เสมอ
+            initDT('activityLogTable', {
+                scrollX: true,
+                autoWidth: false,
+                order: [[0, 'desc']]
+            });
+
+        } catch (err) {
+            hideLoading();
+            page.innerHTML = '<div class="error-message">เกิดข้อผิดพลาด: ' + esc(err.message) + '</div>';
         }
-        if (activityLogs.length > 0) {
-            initDT('activityLogTable', { scrollX: true, autoWidth: false, order: [] });
-        }
-
-    } catch (err) {
-        hideLoading();
-        page.innerHTML = '<div class="error-message">เกิดข้อผิดพลาด: ' + esc(err.message) + '</div>';
     }
-}
 
-window.switchLogTab = function(tab) {
-    const accessBtn = document.getElementById('tabAccess');
-    const activityBtn = document.getElementById('tabActivity');
-    const accessContent = document.getElementById('tabContentAccess');
-    const activityContent = document.getElementById('tabContentActivity');
-
-    if (tab === 'access') {
-        accessBtn.style.background = '#667eea';
-        accessBtn.style.color = '#fff';
-        activityBtn.style.background = '#f1f5f9';
-        activityBtn.style.color = '#475569';
-        accessContent.style.display = 'block';
-        activityContent.style.display = 'none';
-    } else {
-        activityBtn.style.background = '#667eea';
-        activityBtn.style.color = '#fff';
-        accessBtn.style.background = '#f1f5f9';
-        accessBtn.style.color = '#475569';
-        accessContent.style.display = 'none';
-        activityContent.style.display = 'block';
-    }
-};
-    // ============================================================
+    window.switchLogTab = function() {};
+// ============================================================
     // CATEGORIES PAGE (Villages)
     // ============================================================
 
@@ -19546,6 +19565,9 @@ window.switchLogTab = function(tab) {
 
         let list = IMPORT_REPORT_DATA.logs.slice();
 
+        // เรียงลำดับจากล่าสุดไปหลังสุด (Descending)
+        list.sort((a, b) => (b.timeVal || 0) - (a.timeVal || 0));
+
         if (typeFilter && typeFilter !== 'all') {
             list = list.filter(l => l.datasetType === typeFilter);
         }
@@ -19579,7 +19601,7 @@ window.switchLogTab = function(tab) {
             return (
                 '<tr>' +
                 '<td style="text-align: center; color: #94a3b8; font-size: 12px; vertical-align: middle;">' + (idx + 1) + '</td>' +
-                '<td style="vertical-align: middle; white-space: nowrap;">' +
+                '<td data-order="' + (l.timeVal || 0) + '" style="vertical-align: middle; white-space: nowrap;">' +
                 '<div style="font-weight: 600; color: #334155; font-size: 13px;">' + esc(l.timestamp) + '</div>' +
                 '</td>' +
                 '<td style="vertical-align: middle;">' +
@@ -19591,7 +19613,7 @@ window.switchLogTab = function(tab) {
                 '</td>' +
                 '<td style="vertical-align: middle;">' +
                 '<div style="font-weight: 600; color: #334155; font-size: 12.5px;">' + esc(l.fullname !== '-' ? l.fullname : l.username) + '</div>' +
-                '<div style="font-size: 11px; color: #64748b;">@' + esc(l.username) + ' (' + esc(l.role) + ')</div>' +
+                '<div style="font-size: 11px; color: #64748b;">@' + esc(l.username) + (l.role ? ' (' + esc(l.role) + ')' : '') + '</div>' +
                 '</td>' +
                 '<td style="vertical-align: middle;">' +
                 '<div style="font-size: 12.5px; color: #1e293b; line-height: 1.4;">' + esc(l.details) + '</div>' +
@@ -19605,7 +19627,7 @@ window.switchLogTab = function(tab) {
             scrollX: true,
             autoWidth: false,
             pageLength: 25,
-            order: [[0, 'asc']],
+            order: [[1, 'desc']], // เรียงตามคอลัมน์ วัน-เวลาที่นำเข้า (ล่าสุด -> หลังสุด)
             columnDefs: [{ orderable: false, targets: [5] }]
         });
     }
