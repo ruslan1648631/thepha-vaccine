@@ -5141,18 +5141,25 @@
     window.isSSOFacility = isSSOFacility;
 
     function formatThaiDate(dateVal, includeTime) {
-        if (!dateVal) return '-';
-        const d = (dateVal instanceof Date) ? dateVal : new Date(dateVal);
-        if (isNaN(d.getTime())) return dateVal.toString();
+        if (!dateVal || dateVal === '-' || dateVal === '0') return '-';
+        let d = null;
+        if (dateVal instanceof Date) {
+            d = dateVal;
+        } else if (typeof parseBirthDateSafe === 'function') {
+            d = parseBirthDateSafe(dateVal);
+        } else {
+            d = new Date(dateVal);
+        }
+        if (!d || isNaN(d.getTime())) return dateVal.toString();
         const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-        const day = d.getDate();
+        const day = String(d.getDate()).padStart(2, '0');
         const month = thaiMonths[d.getMonth()];
         let y = d.getFullYear();
         if (y < 2400) y += 543;
         let str = `${day} ${month} ${y}`;
-        if (includeTime) {
-            const hh = String(d.getHours()).padStart(2, '0');
-            const mm = String(d.getMinutes()).padStart(2, '0');
+        if (includeTime && dateVal instanceof Date) {
+            const hh = String(dateVal.getHours()).padStart(2, '0');
+            const mm = String(dateVal.getMinutes()).padStart(2, '0');
             str += ` ${hh}:${mm} น.`;
         }
         return str;
@@ -5562,12 +5569,89 @@
         }
     }
 
-    // Direct Login via Supabase (Fast response: 50-100ms)
+    // Direct Login via Supabase Auth & DB (Fast response: 50-100ms)
     async function trySupabaseLogin(username, password) {
         if (!supabaseClient) return null;
         try {
             const inputUser = String(username || '').trim();
             const inputPwd = String(password || '').trim();
+            const cleanUser = inputUser.toLowerCase().replace(/\s+/g, '');
+            const authEmail = inputUser.includes('@') ? inputUser : `${cleanUser}@moph.mail.go.th`;
+
+            // 🔐 1. ลองเข้าสู่ระบบผ่าน Supabase Auth API (JWT Token & มาตรฐานความปลอดภัยสูงสุด)
+            if (supabaseClient.auth && typeof supabaseClient.auth.signInWithPassword === 'function') {
+                try {
+                    const { data: authData, error: authErr } = await supabaseClient.auth.signInWithPassword({
+                        email: authEmail,
+                        password: inputPwd
+                    });
+
+                    if (!authErr && authData && authData.user) {
+                        const authUser = authData.user;
+                        console.log('⚡ [Supabase Auth] เข้าสู่ระบบสำเร็จด้วย Token:', authUser.email);
+
+                        // ดึงข้อมูลโปรไฟล์จากตาราง profiles
+                        let profile = null;
+                        try {
+                            const { data: pData } = await supabaseClient
+                                .from('profiles')
+                                .select('*')
+                                .eq('id', authUser.id)
+                                .maybeSingle();
+                            if (pData) profile = pData;
+                        } catch (pErr) {}
+
+                        // Fallback ดึงจากตาราง users เดิมหากยังไม่มีใน profiles
+                        if (!profile) {
+                            try {
+                                const { data: uData } = await supabaseClient
+                                    .from('users')
+                                    .select('*')
+                                    .ilike('Username', inputUser)
+                                    .maybeSingle();
+                                if (uData) profile = uData;
+                            } catch (uErr) {}
+                        }
+
+                        const status = String((profile && (profile.status || profile.Status)) || 'active').toLowerCase();
+                        if (status === 'inactive') {
+                            await supabaseClient.auth.signOut().catch(() => {});
+                            return { success: false, message: 'บัญชีนี้ถูกระงับการใช้งาน' };
+                        }
+
+                        const loginUser = {
+                            success: true,
+                            hcode: String((profile && (profile.hcode || profile.Hcode)) || (authUser.user_metadata && authUser.user_metadata.hcode) || '-'),
+                            username: String((profile && (profile.username || profile.Username)) || (authUser.user_metadata && authUser.user_metadata.username) || inputUser),
+                            fullname: String((profile && (profile.fullname || profile.Fullname)) || (authUser.user_metadata && authUser.user_metadata.fullname) || inputUser),
+                            role: String((profile && (profile.role || profile.Role)) || (authUser.user_metadata && authUser.user_metadata.role) || 'เจ้าหน้าที่'),
+                            village: String((profile && (profile.village || profile.Village)) || '-'),
+                            subdistrict: String((profile && (profile.subdistrict || profile.Subdistrict)) || '-'),
+                            authId: authUser.id,
+                            token: authData.session ? authData.session.access_token : null,
+                            source: 'supabase_auth'
+                        };
+
+                        // บันทึก Log
+                        try {
+                            supabaseClient.from('Access_Log').insert([{
+                                hcode: loginUser.hcode,
+                                username: loginUser.username,
+                                fullname: loginUser.fullname,
+                                role: loginUser.role,
+                                action: 'LOGIN_AUTH',
+                                created_at: new Date().toISOString()
+                            }]).then();
+                        } catch (e) {}
+
+                        return loginUser;
+                    }
+                } catch (authEx) {
+                    console.warn('Supabase Auth signIn attempt error:', authEx);
+                }
+            }
+
+            // 🔄 2. กรณีผู้ใช้เดิมที่ยังไม่ได้ย้ายเข้าระบบ Supabase Auth: ตรวจสอบผ่านตาราง users เดิม
             const inputHash = await sha256Hex(inputPwd);
 
             // ค้นหา username จากตาราง users (รองรับทั้ง Username และ username)
@@ -5622,8 +5706,26 @@
                 role: String(row.Role || row.role || 'เจ้าหน้าที่'),
                 village: String(row.Village || row.village || '-'),
                 subdistrict: String(row.subdistrict || row.Subdistrict || '-'),
-                source: 'supabase'
+                source: 'supabase_table'
             };
+
+            // อัปเกรด/ลงทะเบียนเข้า Supabase Auth ในพื้นหลังอัตโนมัติ (Seamless Auto-Enroll)
+            if (supabaseClient.auth && typeof supabaseClient.auth.signUp === 'function') {
+                supabaseClient.auth.signUp({
+                    email: authEmail,
+                    password: inputPwd,
+                    options: {
+                        data: {
+                            username: loginUser.username,
+                            fullname: loginUser.fullname,
+                            role: loginUser.role,
+                            hcode: loginUser.hcode,
+                            village: loginUser.village,
+                            subdistrict: loginUser.subdistrict
+                        }
+                    }
+                }).catch(() => {});
+            }
 
             // บันทึก Access_Log ใน Supabase (Background)
             try {
@@ -10610,7 +10712,58 @@ function renderPublicFacilitiesTable(facilities) {
 document.addEventListener('DOMContentLoaded', function() {
     // ✅ แสดง Public Dashboard ก่อน
     showPublicDashboard();
+    // 🔐 ตรวจสอบ Session เดิมของ Supabase Auth
+    checkSupabaseSessionOnLoad();
 });
+
+async function checkSupabaseSessionOnLoad() {
+    if (!supabaseClient || !supabaseClient.auth) return;
+    try {
+        const { data: sessionData, error } = await supabaseClient.auth.getSession();
+        const session = sessionData ? sessionData.session : null;
+        if (session && session.user) {
+            const authUser = session.user;
+            let profile = null;
+            try {
+                const { data: pData } = await supabaseClient
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', authUser.id)
+                    .maybeSingle();
+                if (pData) profile = pData;
+            } catch (e) {}
+
+            if (!profile && authUser.user_metadata && authUser.user_metadata.username) {
+                try {
+                    const { data: uData } = await supabaseClient
+                        .from('users')
+                        .select('*')
+                        .ilike('Username', authUser.user_metadata.username)
+                        .maybeSingle();
+                    if (uData) profile = uData;
+                } catch (e) {}
+            }
+
+            if (profile && (profile.status || '').toLowerCase() !== 'inactive') {
+                APP.currentUser = {
+                    success: true,
+                    hcode: String(profile.hcode || (authUser.user_metadata && authUser.user_metadata.hcode) || '-'),
+                    username: String(profile.username || (authUser.user_metadata && authUser.user_metadata.username) || 'user'),
+                    fullname: String(profile.fullname || (authUser.user_metadata && authUser.user_metadata.fullname) || 'ผู้ใช้งาน'),
+                    role: String(profile.role || (authUser.user_metadata && authUser.user_metadata.role) || 'เจ้าหน้าที่'),
+                    village: String(profile.village || '-'),
+                    subdistrict: String(profile.subdistrict || '-'),
+                    authId: authUser.id,
+                    token: session.access_token,
+                    source: 'supabase_auth_session'
+                };
+                console.log('⚡ [Supabase Auth] คืนค่า Session เดิมสำเร็จ:', APP.currentUser.username);
+            }
+        }
+    } catch (e) {
+        console.warn('Session restore check error:', e);
+    }
+}
 
 /* ============================================================
  *  ✅ NEW: Render ตารางตำบล
@@ -10798,9 +10951,16 @@ function collapseAllVillages() {
     }
 
     function formatDate(val) {
-        if (!val) return '-';
-        const d = new Date(val);
-        if (!isNaN(d.getTime())) {
+        if (!val || val === '-' || val === '0') return '-';
+        let d = null;
+        if (val instanceof Date) {
+            d = val;
+        } else if (typeof parseBirthDateSafe === 'function') {
+            d = parseBirthDateSafe(val);
+        } else {
+            d = new Date(val);
+        }
+        if (d && !isNaN(d.getTime())) {
             // กำหนดให้ day เป็น '2-digit' เพื่อบังคับเติม 0
             return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: '2-digit' });
         }
@@ -10808,22 +10968,38 @@ function collapseAllVillages() {
     }
 
     function formatThaiDateShort(dateVal) {
-        if (!dateVal) return '-';
-        const d = new Date(dateVal);
-        if (isNaN(d.getTime())) return dateVal.toString();
+        if (!dateVal || dateVal === '-' || dateVal === '0') return '-';
+        let d = null;
+        if (dateVal instanceof Date) {
+            d = dateVal;
+        } else if (typeof parseBirthDateSafe === 'function') {
+            d = parseBirthDateSafe(dateVal);
+        } else {
+            d = new Date(dateVal);
+        }
+        if (!d || isNaN(d.getTime())) return dateVal.toString();
         const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
         // เติม 0 ด้านหน้า
         const day = String(d.getDate()).padStart(2, '0');
-        return day + ' ' + thaiMonths[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+        let y = d.getFullYear();
+        if (y < 2400) y += 543;
+        return day + ' ' + thaiMonths[d.getMonth()] + ' ' + y;
     }
 
     function formatDateTime(val) {
-        if (!val) return '-';
-        const d = new Date(val);
-        if (!isNaN(d.getTime())) {
+        if (!val || val === '-' || val === '0') return '-';
+        let d = null;
+        if (val instanceof Date) {
+            d = val;
+        } else if (typeof parseBirthDateSafe === 'function') {
+            d = parseBirthDateSafe(val);
+        } else {
+            d = new Date(val);
+        }
+        if (d && !isNaN(d.getTime())) {
             return d.toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
-        return val;
+        return val.toString();
     }
 
     function parseAgeToMonths(ageStr) {
@@ -10848,13 +11024,25 @@ function collapseAllVillages() {
     // รองรับทั้ง พ.ศ. (>2400) และ ค.ศ., ป้องกันข้อผิดพลาดคำนวณอายุเด็ก 0-5 ปี
     // ============================================================
     function parseBirthDateSafe(val) {
-        if (!val || val === '-' || val === '0') return null;
+        if (!val && val !== 0) return null;
+        if (val === '-' || val === '0' || val === 'undefined' || val === 'null') return null;
         if (val instanceof Date) {
             if (isNaN(val.getTime())) return null;
             let y = val.getFullYear();
             if (y > 2400) y -= 543;
             return new Date(y, val.getMonth(), val.getDate());
         }
+
+        // 0. Excel serial number (เช่น 46034)
+        if (typeof val === 'number' || (typeof val === 'string' && /^\d{5}$/.test(val.trim()))) {
+            const num = Number(val);
+            if (num >= 25569 && num <= 80000) {
+                const epoch = new Date(Date.UTC(1899, 11, 30));
+                const d = new Date(epoch.getTime() + Math.round(num) * 86400000);
+                return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+            }
+        }
+
         const s = String(val).trim();
         if (!s || s === '-' || s === '0' || s === 'undefined' || s === 'null') return null;
 
@@ -10864,6 +11052,18 @@ function collapseAllVillages() {
             let y = parseInt(isoM[1], 10);
             let m = parseInt(isoM[2], 10);
             let d = parseInt(isoM[3], 10);
+            if (y > 2400) y -= 543;
+            if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+                return new Date(y, m - 1, d);
+            }
+        }
+
+        // 1.1 YYYYMMDD (8 หลัก)
+        const ymd8 = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+        if (ymd8) {
+            let y = parseInt(ymd8[1], 10);
+            let m = parseInt(ymd8[2], 10);
+            let d = parseInt(ymd8[3], 10);
             if (y > 2400) y -= 543;
             if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
                 return new Date(y, m - 1, d);
@@ -10914,6 +11114,7 @@ function collapseAllVillages() {
         }
         return null;
     }
+    window.parseBirthDateSafe = parseBirthDateSafe;
 
     function calculateChildAgeDetail(birthDateVal, asOfDate) {
         const dob = parseBirthDateSafe(birthDateVal);
@@ -11451,6 +11652,11 @@ async function warmUpBackend() {
         } catch (e) { console.warn('Logout log error:', e); }
         
         console.log('📝 logActivity → LOGOUT | ออกจากระบบ');
+    }
+
+    // 🔐 ออกจากระบบ Supabase Auth
+    if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.signOut === 'function') {
+        supabaseClient.auth.signOut().catch(() => {});
     }
     
     APP.currentUser = null;
