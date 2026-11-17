@@ -8847,7 +8847,7 @@
             const cleanDigits = childId.replace(/\D/g, '');
             let data = null;
 
-            // 1. เธเนเธเธซเธฒเธ”เนเธงเธข CID (13 เธซเธฅเธฑเธ)
+            // 1. ค้นหาด้วย CID (13 หลัก)
             if (cleanDigits.length === 13) {
                 try {
                     const { data: byCid, error: cidErr } = await supabaseClient.from('data').select('*').eq('CID', cleanDigits).limit(1);
@@ -8855,7 +8855,7 @@
                 } catch(e) {}
             }
 
-            // 2. เธเนเธเธซเธฒเธ”เนเธงเธข HN (เธ•เธฑเธงเน€เธฅเธ 1-10 เธซเธฅเธฑเธ)
+            // 2. ค้นหาด้วย HN (ตัวเลข 1-10 หลัก)
             if (!data && cleanDigits.length > 0 && cleanDigits.length <= 10) {
                 try {
                     const { data: byHn, error: hnErr } = await supabaseClient.from('data').select('*').eq('HN', cleanDigits).limit(1);
@@ -8863,7 +8863,7 @@
                 } catch(e) {}
             }
 
-            // 3. เธเนเธเธซเธฒเธ”เนเธงเธข CID เธซเธฃเธทเธญ HN (or query)
+            // 3. ค้นหาด้วย CID หรือ HN (or query)
             if (!data && cleanDigits.length > 0) {
                 try {
                     const { data: byOr, error: orErr } = await supabaseClient.from('data').select('*').or('CID.eq.' + cleanDigits + ',HN.eq.' + cleanDigits).limit(1);
@@ -8871,7 +8871,7 @@
                 } catch(e) {}
             }
 
-            // 4. เธเนเธเธซเธฒเธ”เนเธงเธขเธเธทเนเธญ-เธชเธเธธเธฅ (fullname ilike)
+            // 4. ค้นหาด้วยชื่อ-สกุล (fullname ilike)
             if (!data && childId.length >= 2) {
                 try {
                     const cleanName = childId.replace(/[\'\"\%\_]/g, '').trim();
@@ -21136,14 +21136,14 @@ async function doLoadCoverage(forceRefresh = false) {
         `<div class="alert alert-danger">${(res && res.message) || 'โหลดข้อมูลไม่สำเร็จ'}</div>`;
       return;
     }
-    const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' เธ.';
+    const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
     res.processedTime = nowStr;
     APP.coverageData = res;
     const selectedQ = document.getElementById('cvQuarter')?.value || '';
     renderCoverage(res, selectedQ);
     const badgeEl = document.getElementById('cvLastProcessedBadge');
     if (badgeEl) {
-      badgeEl.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธฅเนเธฒเธชเธธเธ”: ${nowStr} (เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ)`;
+      badgeEl.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> ประมวลผลล่าสุด: ${nowStr} (ตรงจากฐานข้อมูล)`;
     }
   } catch (err) {
     document.getElementById('cvTables').innerHTML =
@@ -24655,7 +24655,7 @@ async function loadDtpReportPage() {
             filterAndDisplayDtpTable();
             const badge = document.getElementById('dtpLastProcessedBadge');
             if (badge && window.DTP_PROCESSED_TIME) {
-                badge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธฅเนเธฒเธชเธธเธ”: ${window.DTP_PROCESSED_TIME} (เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ)`;
+                badge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> ประมวลผลล่าสุด: ${window.DTP_PROCESSED_TIME} (ตรงจากฐานข้อมูล)`;
             }
         } else {
             const tbody = document.getElementById('dtpTableBody');
@@ -24664,10 +24664,10 @@ async function loadDtpReportPage() {
                     <tr>
                         <td colspan="16" style="text-align:center; padding:45px 20px; color:#64748b;">
                             <i class="fas fa-shield-virus" style="font-size:36px; color:#dc2626; margin-bottom:12px; display:inline-block;"></i>
-                            <div style="font-size:16px; font-weight:700; color:#1e293b; margin-bottom:6px;">เธเธฃเนเธญเธกเธเธฃเธฐเธกเธงเธฅเธเธฅเธฃเธฒเธขเธเธฒเธเน€เธ”เนเธเธเธฒเธ”เธงเธฑเธเธเธตเธเธเธญเธ•เธตเธ</div>
-                            <div style="font-size:13px; color:#64748b; margin-bottom:16px;">เธเธฃเธธเธ“เธฒเธเธ”เธเธธเนเธก <b>"เธเธฃเธฐเธกเธงเธฅเธเธฅเธเนเธญเธกเธนเธฅ"</b> เน€เธเธทเนเธญเธ”เธถเธเธเนเธญเธกเธนเธฅเธฃเธฒเธขเธเธทเนเธญเน€เธ”เนเธเธ•เธฃเธงเธเธชเธญเธเธงเธฑเธเธเธตเธเธเธญเธ•เธตเธเธฅเนเธฒเธชเธธเธ”เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ</div>
+                            <div style="font-size:16px; font-weight:700; color:#1e293b; margin-bottom:6px;">พร้อมประมวลผลรายงานเด็กขาดวัคซีนคอตีบ</div>
+                            <div style="font-size:13px; color:#64748b; margin-bottom:16px;">กรุณากดปุ่ม <b>"ประมวลผลข้อมูล"</b> เพื่อดึงข้อมูลรายชื่อเด็กตรวจสอบวัคซีนคอตีบล่าสุดตรงจากฐานข้อมูล</div>
                             <button class="btn" onclick="fetchAndRenderDtpData(true)" style="background:#dc2626; color:white; border:none; padding:9px 20px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px;">
-                                <i class="fas fa-sync-alt"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธเนเธญเธกเธนเธฅ
+                                <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
                             </button>
                         </td>
                     </tr>
@@ -24736,11 +24736,11 @@ async function fetchAndRenderDtpData(forceRefresh = false) {
         // อัปเดตรายการหมู่บ้านใน Dropdown dtpVillage
         populateDtpVillageDropdown(window.DTP_RAW_CHILDREN);
 
-        const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' เธ.';
+        const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
         window.DTP_PROCESSED_TIME = nowStr;
         const dtpBadge = document.getElementById('dtpLastProcessedBadge');
         if (dtpBadge) {
-            dtpBadge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> เธเธฃเธฐเธกเธงเธฅเธเธฅเธฅเนเธฒเธชเธธเธ”: ${nowStr} (เธ•เธฃเธเธเธฒเธเธเธฒเธเธเนเธญเธกเธนเธฅ)`;
+            dtpBadge.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981;"></i> ประมวลผลล่าสุด: ${nowStr} (ตรงจากฐานข้อมูล)`;
         }
 
         updateDtpStats(window.DTP_RAW_CHILDREN);
