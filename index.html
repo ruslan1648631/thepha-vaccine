@@ -7075,6 +7075,10 @@
                     }
                 }
 
+                const schFromData = row.school || row.School || row['โรงเรียน'] || row['ศพด'] || '';
+                const schFromTrack = schoolMap.get(cleanCid) || (rowName ? schoolMap.get(rowName) : '') || '';
+                const finalSchool = schFromData || schFromTrack || '';
+
                 children.push({
                     id: rowId,
                     cid: rowId,
@@ -7084,10 +7088,9 @@
                     isoDob: isoDob,
                     age: ageComputed || '-',
                     ageMonths: ageMonths,
-                    startAgeMonths: startAgeMonths,
-                    isTwoDoseSchedule: isTwoDoseSchedule,
+                    school: finalSchool,
                     type: row.type || row['type'] || 1,
-                    typeLabel: Number(row.type) === 4 ? 'Type 4 (นอกเขต)' : `Type ${row.type || 1} (ในเขต)`,
+                    typeLabel: Number(row.type) === 4 ? 'Type 4 (นอกเขต)' : ('Type ' + (row.type || 1) + ' (ในเขต)'),
                     houseNumber: row.house || row.house_no || row.houseNumber || row['บ้านเลขที่'] || '-',
                     village: row.moo || row.village_no || row.village || row['หมู่ที่'] || '-',
                     villageName: row.villname || row.village_name || row.villageName || '-',
@@ -7116,7 +7119,48 @@
         }
 
 
-                // 16.7 รายงานตรวจสอบและติดตามวัคซีนคอตีบ (DTP Outbreak Response สำหรับพื้นที่ระบาด)
+                // 16.65 บันทึกข้อมูลโรงเรียนของเด็ก (Save Child School)
+        if (fnName === 'saveChildSchool') {
+            const payload = args[0] || {};
+            const cleanCid = String(payload.cid || payload.id || '').replace(/\D/g, '').trim();
+            const cleanHn = String(payload.hn || '').trim();
+            const cleanSchool = String(payload.school || '').trim();
+            const fullname = payload.fullname || '-';
+            const village = payload.village || '-';
+            const user = (APP.currentUser && APP.currentUser.username) ? APP.currentUser.username : 'user';
+
+            // 1. บันทึกลงตาราง data (ถ้ามีคอลัมน์ school)
+            try {
+                if (cleanCid) {
+                    await supabaseClient.from('data').update({ school: cleanSchool }).eq('CID', cleanCid);
+                } else if (cleanHn) {
+                    await supabaseClient.from('data').update({ school: cleanSchool }).eq('HN', cleanHn);
+                }
+            } catch (eData) {
+                console.warn('update data.school (optional):', eData);
+            }
+
+            // 2. บันทึกถาวรลงตาราง VCC_tracking
+            try {
+                const childIdVal = Number(cleanCid) || 0;
+                await supabaseClient.from('VCC_tracking').insert([{
+                    ChildId: childIdVal,
+                    ChildName: fullname,
+                    Village: village,
+                    Status: 'ระบุโรงเรียน',
+                    Vaccine: 'SCHOOL',
+                    Remarks: cleanSchool,
+                    Reporter: user,
+                    Timestamp: new Date().toISOString()
+                }]);
+            } catch (eTrack) {
+                console.warn('insert VCC_tracking school:', eTrack);
+            }
+
+            return { success: true, message: 'บันทึกข้อมูลโรงเรียนสำเร็จ' };
+        }
+
+        // 16.7 รายงานตรวจสอบและติดตามวัคซีนคอตีบ (DTP Outbreak Response สำหรับพื้นที่ระบาด)
         if (fnName === 'getDtpOutbreakReport') {
             const filters = args[0] || {};
             const userRoleNorm = String(filters.userRole || '').toLowerCase().trim();
@@ -7161,6 +7205,31 @@
                 if (h) refusedSet.add(h);
                 if (n) refusedSet.add(n);
             });
+
+            // ดึงข้อมูลโรงเรียน/ศพด. จาก VCC_tracking
+            const schoolMap = new Map();
+            try {
+                const { data: trackSchools } = await supabaseClient
+                    .from('VCC_tracking')
+                    .select('ChildId, ChildName, Remarks, Vaccine, Status, Timestamp')
+                    .or('Status.eq.ระบุโรงเรียน,Vaccine.eq.SCHOOL')
+                    .order('Timestamp', { ascending: false });
+                if (trackSchools && trackSchools.length > 0) {
+                    trackSchools.forEach(ts => {
+                        const idKey = String(ts.ChildId || '').trim();
+                        const nameKey = String(ts.ChildName || '').trim();
+                        const sch = String(ts.Remarks || '').trim();
+                        if (idKey && idKey !== '0' && !schoolMap.has(idKey)) {
+                            schoolMap.set(idKey, sch);
+                        }
+                        if (nameKey && !schoolMap.has(nameKey)) {
+                            schoolMap.set(nameKey, sch);
+                        }
+                    });
+                }
+            } catch (eSch) {
+                console.warn('getDtpOutbreakReport: could not fetch schools from VCC_tracking', eSch);
+            }
 
             // ตรวจสอบและ Deduplicate รายชื่อเด็ก
             const todayIso = new Date().toISOString().slice(0, 10);
@@ -8997,6 +9066,7 @@
                 asm: raw.VHV || raw.vhv || raw.asm || row['อสม.'] || row['อสม'] || '-',
                 phone: raw.phone || row['โทรศัพท์'] || '-',
                 gps: raw.GPS || raw.gps || raw['พิกัด'] || '-',
+                school: raw.school || raw.School || raw['โรงเรียน'] || raw['ศพด'] || '-',
                 fatherName: raw.father || raw.fatherName || raw['ชื่อบิดา'] || '-',
                 motherName: raw.mother || raw.motherName || raw['ชื่อมารดา'] || '-',
                 status: evalRes.status,
@@ -13470,6 +13540,7 @@ function updateBottomNavActive(page) {
                 '<div><small style="color:#64748b; font-size:12px;">อสม.ประจำ</small><div style="font-weight:500;">' + esc(c.asm || '-') + '</div></div>' +
                 '<div><small style="color:#64748b; font-size:12px;">บิดา</small><div style="font-weight:500;">' + esc(c.fatherName || '-') + '</div></div>' +
                 '<div><small style="color:#64748b; font-size:12px;">มารดา</small><div style="font-weight:500;">' + esc(c.motherName || '-') + '</div></div>' +
+                '<div style="grid-column:1/-1"><small style="color:#64748b; font-size:12px;">โรงเรียน / ศูนย์พัฒนาเด็กเล็ก (ศพด.)</small><div style="font-weight:600; color:#2563eb;"><i class="fas fa-school" style="margin-right:4px;"></i>' + esc(c.school || 'ยังไม่ระบุ') + '</div></div>' +
                 '</div>' +
                 '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">' +
                 '<strong style="font-size:15px; color:#0f172a;"><i class="fas fa-syringe" style="color:#667eea;"></i> ประวัติการรับวัคซีนทั้งหมด</strong>' +
@@ -24455,6 +24526,9 @@ async function loadDtpReportPage() {
                     <button id="dtpPrintOutreachBtn" class="btn" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; padding:8px 14px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
                         <i class="fas fa-clipboard-list"></i> พิมพ์ใบติดตาม อสม. (ลงพื้นที่)
                     </button>
+                    <button id="dtpBatchSchoolBtn" class="btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 14px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;" onclick="openDtpBatchSchoolModal()" title="กำหนดโรงเรียนให้เด็กที่เลือก">
+                        <i class="fas fa-school"></i> ระบุโรงเรียนแบบกลุ่ม
+                    </button>
                     <button id="dtpExportBtn" class="btn" style="background:#10b981; color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 4px rgba(16,185,129,0.25);">
                         <i class="fas fa-file-excel"></i> ส่งออก Excel
                     </button>
@@ -24660,7 +24734,7 @@ async function loadDtpReportPage() {
                         </thead>
                         <tbody id="dtpTableBody">
                             <tr>
-                                <td colspan="16" style="text-align:center; padding:30px; color:#64748b;">กำลังโหลดข้อมูล...</td>
+                                <td colspan="17" style="text-align:center; padding:30px; color:#64748b;">กำลังโหลดข้อมูล...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -24673,6 +24747,8 @@ async function loadDtpReportPage() {
 
         if (window.DTP_RAW_CHILDREN && window.DTP_RAW_CHILDREN.length > 0) {
             populateDtpVillageDropdown(window.DTP_RAW_CHILDREN);
+        populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
+        populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
             updateDtpStats(window.DTP_RAW_CHILDREN);
             filterAndDisplayDtpTable();
             const badge = document.getElementById('dtpLastProcessedBadge');
@@ -24684,7 +24760,7 @@ async function loadDtpReportPage() {
             if (tbody) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="16" style="text-align:center; padding:45px 20px; color:#64748b;">
+                        <td colspan="17" style="text-align:center; padding:45px 20px; color:#64748b;">
                             <i class="fas fa-shield-virus" style="font-size:36px; color:#dc2626; margin-bottom:12px; display:inline-block;"></i>
                             <div style="font-size:16px; font-weight:700; color:#1e293b; margin-bottom:6px;">พร้อมประมวลผลรายงานเด็กขาดวัคซีนคอตีบ</div>
                             <div style="font-size:13px; color:#64748b; margin-bottom:16px;">กรุณากดปุ่ม <b>"ประมวลผลข้อมูล"</b> เพื่อดึงข้อมูลรายชื่อเด็กตรวจสอบวัคซีนคอตีบล่าสุดตรงจากฐานข้อมูล</div>
@@ -24702,6 +24778,7 @@ async function loadDtpReportPage() {
         if (facEl) facEl.addEventListener('change', () => fetchAndRenderDtpData(true));
         document.getElementById('dtpType').addEventListener('change', () => fetchAndRenderDtpData(true));
         document.getElementById('dtpVillage').addEventListener('change', filterAndDisplayDtpTable);
+        const dtpSchEl = document.getElementById('dtpSchool'); if (dtpSchEl) dtpSchEl.addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpStatus').addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpMissedDose').addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpSearch').addEventListener('input', debounce(filterAndDisplayDtpTable, 300));
@@ -24778,6 +24855,30 @@ async function fetchAndRenderDtpData(forceRefresh = false) {
     }
 }
 
+
+function populateDtpSchoolDropdown(children) {
+    const sEl = document.getElementById('dtpSchool');
+    if (!sEl) return;
+    const currentVal = sEl.value;
+
+    const schoolSet = new Set();
+    (children || []).forEach(c => {
+        const s = String(c.school || '').trim();
+        if (s && s !== '-' && s !== '0' && s !== 'ไม่ระบุ') schoolSet.add(s);
+    });
+
+    const schools = Array.from(schoolSet).sort((a, b) => a.localeCompare(b, 'th'));
+
+    let opts = '<option value="ทั้งหมด">-- ทุกโรงเรียน/ศพด. --</option>';
+    opts += '<option value="unassigned">⚠️ ยังไม่ได้ระบุโรงเรียน</option>';
+    schools.forEach(sch => {
+        opts += `<option value="${esc(sch)}">${esc(sch)}</option>`;
+    });
+    sEl.innerHTML = opts;
+    if (currentVal && (schoolSet.has(currentVal) || currentVal === 'unassigned')) {
+        sEl.value = currentVal;
+    }
+}
 function populateDtpVillageDropdown(children) {
     const vEl = document.getElementById('dtpVillage');
     if (!vEl) return;
@@ -24879,7 +24980,7 @@ function filterAndDisplayDtpTable() {
 
         // กรองคำค้นหา
         if (searchVal) {
-            const rowText = `${c.cid || ''} ${c.hn || ''} ${c.fullname || ''} ${c.phone || ''} ${c.village || ''} ${c.subdistrict || ''}`.toLowerCase();
+            const rowText = `${c.cid || ''} ${c.hn || ''} ${c.fullname || ''} ${c.school || ''} ${c.phone || ''} ${c.village || ''} ${c.subdistrict || ''}`.toLowerCase();
             if (!rowText.includes(searchVal)) return false;
         }
 
@@ -24901,7 +25002,7 @@ function renderDtpTargetTable() {
     if (window.DTP_FILTERED_CHILDREN.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="16" style="text-align:center; padding:40px 20px; color:#64748b;">
+                <td colspan="17" style="text-align:center; padding:40px 20px; color:#64748b;">
                     <div style="font-size:36px; margin-bottom:10px; color:#cbd5e1;"><i class="fas fa-folder-open"></i></div>
                     <div style="font-size:15px; font-weight:600; color:#334155;">ไม่พบข้อมูลเด็กที่ตรงตามเงื่อนไขการค้นหา</div>
                     <div style="font-size:13px; color:#94a3b8; margin-top:4px;">(ลองเปลี่ยนตัวกรองสถานะ หรือเปลี่ยนสถานพยาบาล/หมู่บ้าน)</div>
@@ -25177,9 +25278,9 @@ function exportDtpExcel() {
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
         ws['!merges'] = [
-            { s: { r: 0, c: 0 }, e: { r: 0, c: 20 } },
-            { s: { r: 1, c: 0 }, e: { r: 1, c: 20 } },
-            { s: { r: 2, c: 0 }, e: { r: 2, c: 20 } }
+            { s: { r: 0, c: 0 }, e: { r: 0, c: 21 } },
+            { s: { r: 1, c: 0 }, e: { r: 1, c: 21 } },
+            { s: { r: 2, c: 0 }, e: { r: 2, c: 21 } }
         ];
         ws['!cols'] = [
             { wch: 6 },   // #
@@ -25206,7 +25307,9 @@ function exportDtpExcel() {
         ];
 
         XLSX.utils.book_append_sheet(wb, ws, 'เด็กขาดวัคซีนคอตีบ');
-        const fileName = 'รายงานเด็กขาดวัคซีนคอตีบ_พื้นที่ระบาดเทพา_' + today.toISOString().slice(0, 10) + '.xlsx';
+        const schoolFilterVal = document.getElementById('dtpSchool') ? document.getElementById('dtpSchool').value : 'ทั้งหมด';
+        const schoolSuffix = (schoolFilterVal && schoolFilterVal !== 'ทั้งหมด' && schoolFilterVal !== 'unassigned') ? '_' + schoolFilterVal.replace(/[/\\?%*:|"<>]/g, '') : '';
+        const fileName = 'รายงานเด็กขาดวัคซีนคอตีบ' + schoolSuffix + '_พื้นที่ระบาดเทพา_' + today.toISOString().slice(0, 10) + '.xlsx';
         XLSX.writeFile(wb, fileName);
 
         hideLoading();
@@ -25255,6 +25358,7 @@ function printDtpOutreachSheet() {
                 <td style="text-align:center; padding:6px 4px; border:1px solid #333; font-size:11px;">${esc(c.age)}</td>
                 <td style="padding:6px 6px; border:1px solid #333; font-size:11px;">
                     บ.${esc(c.houseNumber || '-')} ม.${esc(c.village || '-')} ต.${esc(c.subdistrict || '-')}<br>
+                    ${c.school && c.school !== '-' ? '<span style="color:#1d4ed8; font-weight:600;"><i class="fas fa-school"></i> ' + esc(c.school) + '</span><br>' : ''}
                     โทร: <strong>${esc(c.phone || '-')}</strong>
                 </td>
                 <td style="padding:6px 6px; border:1px solid #333; font-size:11px;">
@@ -26269,3 +26373,224 @@ function printDtpOutreachSheet() {
 
 </body>
 </html>
+
+// ============================================================
+// ระบบระบุและจัดการโรงเรียน/ศพด. สำหรับรายงานติดตามวัคซีนคอตีบ
+// ============================================================
+const DTP_THEPHA_SCHOOLS = [
+    'ศพด.บ้านท่าม่วง', 'ศพด.บ้านทุ่งโดน', 'ศพด.บ้านลำไพล', 'ศพด.บ้านตูหยง', 'ศพด.บ้านตาแปด',
+    'ศพด.บ้านเกาะสะบ้า', 'ศพด.บ้านท่าไทร', 'ศพด.บ้านพรุชิง', 'ศพด.บ้านวังใหญ่', 'ศพด.บ้านสะกอม',
+    'ศพด.บ้านท่าแมงลัก', 'ศพด.เทศบาลตำบลเทพา', 'ศพด.อบต.ท่าม่วง', 'ศพด.อบต.ลำไพล', 'ศพด.อบต.สะกอม',
+    'โรงเรียนชุมชนบ้านเทพา', 'โรงเรียนบ้านท่าม่วง', 'โรงเรียนบ้านทุ่งโดน', 'โรงเรียนบ้านลำไพล',
+    'โรงเรียนบ้านตูหยง', 'โรงเรียนบ้านตาแปด', 'โรงเรียนบ้านเกาะสะบ้า', 'โรงเรียนบ้านพรุชิง',
+    'โรงเรียนบ้านสะกอม', 'โรงเรียนบ้านวังใหญ่', 'โรงเรียนบ้านท่าแมงลัก', 'โรงเรียนบ้านท่าไทร',
+    'โรงเรียนบ้านควนหรัง', 'โรงเรียนบ้านกะโผะ', 'โรงเรียนบ้านแม่ที', 'โรงเรียนบ้านปากบางสะกอม',
+    'โรงเรียนอนุบาลเทพา', 'โรงเรียนบำรุงวิทย์', 'โรงเรียนสายสินวิทยา', 'โรงเรียนมุสลิมวิทยามูลนิธิ'
+];
+
+window.openEditDtpSchoolModal = async function(cid, childName, currentSchool) {
+    // รวบรวมรายชื่อโรงเรียนทั้งหมดที่มีในระบบ + รายชื่อโรงเรียนมาตรฐานในอำเภอเทพา
+    const existingSchools = new Set(DTP_THEPHA_SCHOOLS);
+    (window.DTP_RAW_CHILDREN || []).forEach(c => {
+        if (c.school && c.school.trim() && c.school !== '-') existingSchools.add(c.school.trim());
+    });
+    const schoolList = Array.from(existingSchools).sort((a, b) => a.localeCompare(b, 'th'));
+
+    const optionsDatalist = schoolList.map(s => `<option value="${esc(s)}"></option>`).join('');
+
+    const { value: formValues } = await Swal.fire({
+        title: '<div style="font-size:18px; font-weight:700; color:#1e293b; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-school" style="color:#2563eb;"></i> ระบุโรงเรียน / ศูนย์พัฒนาเด็กเล็ก (ศพด.)</div>',
+        html: `
+            <div style="text-align:left; font-family:Kanit; font-size:13px; line-height:1.6; margin-top:8px;">
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin-bottom:14px;">
+                    <div style="font-weight:700; color:#0f172a; font-size:14px;">${esc(childName)}</div>
+                    <div style="color:#64748b; font-size:12px; margin-top:2px;">เลขบัตร ปชช. (CID): <strong>${esc(cid || '-')}</strong></div>
+                </div>
+                <label style="font-weight:600; color:#334155; display:block; margin-bottom:6px;">
+                    ชื่อโรงเรียน หรือ ศูนย์พัฒนาเด็กเล็ก (ศพด.) ที่เด็กเรียน:
+                </label>
+                <input list="schoolSuggestionsList" id="swalSchoolInput" class="swal2-input" 
+                       style="width:100%; box-sizing:border-box; margin:0 0 12px 0; font-family:Kanit; font-size:14px;" 
+                       placeholder="พิมพ์ชื่อโรงเรียน หรือคลิกเลือกจากรายการแนะนำ..." 
+                       value="${esc(currentSchool || '')}" autocomplete="off">
+                <datalist id="schoolSuggestionsList">
+                    ${optionsDatalist}
+                </datalist>
+                <div style="font-size:12px; color:#64748b;">
+                    💡 สามารถพิมพ์ชื่อโรงเรียน/ศพด. หรือเลือกจากรายการที่พบบ่อยได้ทันที
+                </div>
+            </div>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        showDenyButton: Boolean(currentSchool),
+        confirmButtonText: '<i class="fas fa-save"></i> บันทึกข้อมูล',
+        denyButtonText: '<i class="fas fa-eraser"></i> ล้างข้อมูล (ไม่ระบุ)',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#2563eb',
+        denyButtonColor: '#94a3b8',
+        cancelButtonColor: '#cbd5e1',
+        preConfirm: () => {
+            const input = document.getElementById('swalSchoolInput');
+            return input ? input.value.trim() : '';
+        }
+    });
+
+    if (formValues === undefined) return; // user cancelled
+
+    let newSchool = formValues;
+    if (formValues === false) {
+        // user clicked deny (ล้างข้อมูล)
+        newSchool = '';
+    }
+
+    showLoading('กำลังบันทึกข้อมูลโรงเรียน...');
+    try {
+        const childObj = (window.DTP_RAW_CHILDREN || []).find(c => c.cid === cid || c.id === cid);
+        const res = await callGAS('saveChildSchool', [{
+            cid: cid,
+            hn: childObj ? childObj.hn : '',
+            fullname: childName,
+            village: childObj ? childObj.village : '',
+            school: newSchool
+        }]);
+
+        hideLoading();
+
+        if (res && res.success) {
+            // อัปเดตในหน่วยความจำทันที
+            if (childObj) childObj.school = newSchool;
+            (window.DTP_FILTERED_CHILDREN || []).forEach(c => {
+                if (c.cid === cid || c.id === cid) c.school = newSchool;
+            });
+
+            populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
+            renderDtpTargetTable();
+
+            Swal.fire({
+                icon: 'success',
+                title: 'บันทึกสำเร็จ!',
+                text: newSchool ? `ระบุโรงเรียน "${newSchool}" เรียบร้อยแล้ว` : 'ล้างข้อมูลโรงเรียนเรียบร้อยแล้ว',
+                timer: 1800,
+                showConfirmButton: false
+            });
+        } else {
+            Swal.fire('ผิดพลาด', res ? res.message : 'ไม่สามารถบันทึกข้อมูลโรงเรียนได้', 'error');
+        }
+    } catch (err) {
+        hideLoading();
+        console.error('saveChildSchool error:', err);
+        Swal.fire('ผิดพลาด', err.message, 'error');
+    }
+};
+
+window.openDtpBatchSchoolModal = async function() {
+    if (!window.DTP_FILTERED_CHILDREN || window.DTP_FILTERED_CHILDREN.length === 0) {
+        return Swal.fire('แจ้งเตือน', 'ไม่มีรายชื่อเด็กในตารางปัจจุบัน', 'info');
+    }
+
+    const currentVillage = document.getElementById('dtpVillage') ? document.getElementById('dtpVillage').value : 'ทั้งหมด';
+    const villageText = currentVillage !== 'ทั้งหมด' ? `หมู่ที่ ${currentVillage}` : 'ทุกหมู่บ้าน';
+
+    const existingSchools = new Set(DTP_THEPHA_SCHOOLS);
+    (window.DTP_RAW_CHILDREN || []).forEach(c => {
+        if (c.school && c.school.trim() && c.school !== '-') existingSchools.add(c.school.trim());
+    });
+    const schoolList = Array.from(existingSchools).sort((a, b) => a.localeCompare(b, 'th'));
+    const optionsDatalist = schoolList.map(s => `<option value="${esc(s)}"></option>`).join('');
+
+    const unassignedCount = window.DTP_FILTERED_CHILDREN.filter(c => !c.school || c.school === '-' || !c.school.trim()).length;
+
+    const { value: formValues } = await Swal.fire({
+        title: '<div style="font-size:18px; font-weight:700; color:#1e40af; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-users-cog"></i> ระบุโรงเรียนแบบกลุ่ม (Batch Assign)</div>',
+        html: `
+            <div style="text-align:left; font-family:Kanit; font-size:13px; line-height:1.6; margin-top:8px;">
+                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px; margin-bottom:14px;">
+                    <div>เป้าหมายในตารางขณะนี้: <strong>${window.DTP_FILTERED_CHILDREN.length} คน</strong> (${villageText})</div>
+                    <div style="color:#b91c1c; font-size:12.5px; margin-top:2px;">ยังไม่ได้ระบุโรงเรียน: <strong>${unassignedCount} คน</strong></div>
+                </div>
+                <label style="font-weight:600; color:#334155; display:block; margin-bottom:6px;">
+                    เลือกหรือพิมพ์ชื่อโรงเรียน / ศพด. ที่ต้องการกำหนด:
+                </label>
+                <input list="batchSchoolSuggestions" id="swalBatchSchoolInput" class="swal2-input" 
+                       style="width:100%; box-sizing:border-box; margin:0 0 12px 0; font-family:Kanit; font-size:14px;" 
+                       placeholder="พิมพ์ชื่อโรงเรียน หรือเลือกจากรายการแนะนำ..." autocomplete="off">
+                <datalist id="batchSchoolSuggestions">
+                    ${optionsDatalist}
+                </datalist>
+
+                <div style="margin-top:10px; background:#f8fafc; border:1px solid #e2e8f0; padding:10px 12px; border-radius:8px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#334155;">
+                        <input type="radio" name="batchScope" value="unassigned" checked style="accent-color:#2563eb;">
+                        <span>เฉพาะเด็กที่ <strong>"ยังไม่ได้ระบุโรงเรียน"</strong> ในตาราง (${unassignedCount} คน)</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#334155; margin-top:6px;">
+                        <input type="radio" name="batchScope" value="all" style="accent-color:#2563eb;">
+                        <span>เด็กทั้งหมดในตารางนี้ (${window.DTP_FILTERED_CHILDREN.length} คน)</span>
+                    </label>
+                </div>
+            </div>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-check-circle"></i> ยืนยันบันทึกทั้งกลุ่ม',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#2563eb',
+        cancelButtonColor: '#94a3b8',
+        preConfirm: () => {
+            const sch = document.getElementById('swalBatchSchoolInput')?.value.trim();
+            const scope = document.querySelector('input[name="batchScope"]:checked')?.value || 'unassigned';
+            if (!sch) {
+                Swal.showValidationMessage('กรุณาระบุชื่อโรงเรียน/ศพด.');
+                return false;
+            }
+            return { school: sch, scope: scope };
+        }
+    });
+
+    if (!formValues) return;
+
+    const targetChildren = window.DTP_FILTERED_CHILDREN.filter(c => {
+        if (formValues.scope === 'unassigned') {
+            return !c.school || c.school === '-' || !c.school.trim();
+        }
+        return true;
+    });
+
+    if (targetChildren.length === 0) {
+        return Swal.fire('แจ้งเตือน', 'ไม่มีรายชื่อเด็กตามเงื่อนไขที่เลือก', 'info');
+    }
+
+    showLoading(`กำลังบันทึกโรงเรียนให้เด็ก ${targetChildren.length} คน...`);
+    let successCount = 0;
+    try {
+        for (const c of targetChildren) {
+            c.school = formValues.school;
+            await callGAS('saveChildSchool', [{
+                cid: c.cid || c.id,
+                hn: c.hn || '',
+                fullname: c.fullname,
+                village: c.village,
+                school: formValues.school
+            }]);
+            successCount++;
+        }
+        hideLoading();
+
+        populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
+        renderDtpTargetTable();
+
+        Swal.fire({
+            icon: 'success',
+            title: 'บันทึกสำเร็จ!',
+            text: `บันทึกโรงเรียน "${formValues.school}" ให้เด็กสำเร็จรวม ${successCount} คน`,
+            timer: 2500,
+            showConfirmButton: false
+        });
+    } catch (err) {
+        hideLoading();
+        console.error('Batch school error:', err);
+        renderDtpTargetTable();
+        Swal.fire('ผิดพลาดบางส่วน', `บันทึกสำเร็จ ${successCount} คน, เกิดข้อผิดพลาด: ${err.message}`, 'warning');
+    }
+};
