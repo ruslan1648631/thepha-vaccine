@@ -23218,6 +23218,7 @@ async function exportDuplicateReportExcel() {
                 i + 1,
                 c.id ? String(c.id) : (c.cleanCid ? String(c.cleanCid) : ''),
                 c.fullname || '',
+                (c.school && c.school !== '-' && c.school !== '0') ? c.school : 'ยังไม่ระบุ',
                 c.birthDate || '',
                 c.age || '',
                 c.facilityCount || 2,
@@ -23237,6 +23238,7 @@ async function exportDuplicateReportExcel() {
             { wch: 6 },   // #
             { wch: 18 },  // CID
             { wch: 26 },  // ชื่อ-สกุล
+            { wch: 24 },  // โรงเรียน / ศพด.
             { wch: 14 },  // วันเกิด
             { wch: 12 },  // อายุ
             { wch: 22 },  // จำนวนสถานพยาบาล
@@ -23655,6 +23657,7 @@ function exportOutOfAreaToExcel() {
                 String(c.cid || c.id || ''),
                 c.hn || '',
                 c.fullname || '',
+                (c.school && c.school !== '-' && c.school !== '0') ? c.school : 'ยังไม่ระบุ',
                 c.birthDate || '',
                 c.age || '',
                 'Type 4 (นอกเขต)',
@@ -24523,7 +24526,10 @@ async function loadDtpReportPage() {
                         <i class="fas fa-clipboard-list"></i> พิมพ์ใบติดตาม อสม. (ลงพื้นที่)
                     </button>
                     <button id="dtpExportBtn" class="btn" style="background:#10b981; color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 4px rgba(16,185,129,0.25);">
-                        <i class="fas fa-file-excel"></i> ส่งออก Excel
+                        <i class="fas fa-file-excel"></i> ส่งออก Excel (ตามตัวกรอง)
+                    </button>
+                    <button id="dtpExportBySchoolBtn" class="btn" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(37,99,235,0.3); transition:all 0.2s;">
+                        <i class="fas fa-school"></i> ส่งออกแยกรายโรงเรียน
                     </button>
                 </div>
             </div>
@@ -24786,6 +24792,8 @@ async function loadDtpReportPage() {
         const dtpProcBtn = document.getElementById('dtpProcessBtn');
         if (dtpProcBtn) dtpProcBtn.addEventListener('click', () => fetchAndRenderDtpData(true));
         document.getElementById('dtpExportBtn').addEventListener('click', exportDtpExcel);
+        const schoolExpBtn = document.getElementById('dtpExportBySchoolBtn');
+        if (schoolExpBtn) schoolExpBtn.addEventListener('click', exportDtpBySchoolExcel);
         document.getElementById('dtpPrintOutreachBtn').addEventListener('click', printDtpOutreachSheet);
 
     } catch (err) {
@@ -25273,7 +25281,7 @@ function exportDtpExcel() {
             [],
             [
                 '#', 'รหัสสถานพยาบาล', 'สถานพยาบาล', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ-สกุล',
-                'ว/ด/ปเกิด', 'อายุปัจจุบัน', 'อายุ (เดือน)', 'ประเภทเด็ก', 'บ้านเลขที่', 'หมู่ที่',
+                'โรงเรียน / ศพด.', 'ว/ด/ปเกิด', 'อายุปัจจุบัน', 'อายุ (เดือน)', 'ประเภทเด็ก', 'บ้านเลขที่', 'หมู่ที่',
                 'ตำบล', 'เบอร์โทรศัพท์', 'DTP1 (2ด.)', 'DTP2 (4ด.)', 'DTP3 (6ด.)', 'DTP4 (18ด.)',
                 'DTP5 (4ปี)', 'เข็มที่ขาด/ต้องฉีดเร่งรัด', 'สถานะการประเมิน'
             ]
@@ -25289,6 +25297,7 @@ function exportDtpExcel() {
                 String(c.cid || c.id || ''),
                 c.hn || '',
                 c.fullname || '',
+                (c.school && c.school !== '-' && c.school !== '0') ? c.school : 'ยังไม่ระบุ',
                 c.birthDate || '',
                 c.age || '',
                 c.ageMonths !== undefined ? c.ageMonths : '',
@@ -25320,6 +25329,7 @@ function exportDtpExcel() {
             { wch: 20 },  // CID
             { wch: 14 },  // HN
             { wch: 26 },  // ชื่อ-สกุล
+            { wch: 24 },  // โรงเรียน / ศพด.
             { wch: 14 },  // วันเกิด
             { wch: 14 },  // อายุ
             { wch: 10 },  // อายุ (ด.)
@@ -26500,6 +26510,342 @@ function printDtpOutreachSheet() {
             Swal.fire('ผิดพลาด', err.message, 'error');
         }
     };
+    
+// ============================================================
+// ฟังก์ชันส่งออกทะเบียนติดตามวัคซีนคอตีบ แยกรายโรงเรียน/ศพด. (สำหรับ สสอ.)
+// ============================================================
+window.exportDtpBySchoolExcel = async function() {
+    if (!window.DTP_RAW_CHILDREN || window.DTP_RAW_CHILDREN.length === 0) {
+        Swal.fire('แจ้งเตือน', 'กรุณากดปุ่ม "ประมวลผลข้อมูล" ก่อนทำการส่งออก', 'info');
+        return;
+    }
+
+    // Deduplicate รายชื่อเด็กทั้งหมด
+    const seen = new Set();
+    const allUniqueChildren = [];
+    window.DTP_RAW_CHILDREN.forEach(c => {
+        const hcode = String(c.hcode || '').trim();
+        const cid = String(c.cid || c.id || '').replace(/\D/g, '').trim();
+        const hn = String(c.hn || '').trim();
+        const key = cid.length >= 5 ? (hcode + '_' + cid) : (hcode + '_' + hn);
+        if (!seen.has(key)) {
+            seen.add(key);
+            allUniqueChildren.push(c);
+        }
+    });
+
+    // จัดกลุ่มเด็กตามโรงเรียน
+    const schoolGroups = new Map();
+    const unassignedChildren = [];
+
+    allUniqueChildren.forEach(c => {
+        const sch = String(c.school || '').trim();
+        if (sch && sch !== '-' && sch !== '0' && sch !== 'ไม่ระบุ') {
+            if (!schoolGroups.has(sch)) schoolGroups.set(sch, []);
+            schoolGroups.get(sch).push(c);
+        } else {
+            unassignedChildren.push(c);
+        }
+    });
+
+    const schoolNames = Array.from(schoolGroups.keys()).sort((a, b) => a.localeCompare(b, 'th'));
+    const totalAssignedChildren = allUniqueChildren.length - unassignedChildren.length;
+
+    // สร้างตัวเลือก Dropdown สำหรับเลือกโรงเรียนเดี่ยว
+    let schoolOptionsHtml = '';
+    schoolNames.forEach(s => {
+        const count = schoolGroups.get(s).length;
+        schoolOptionsHtml += '<option value="' + esc(s) + '">' + esc(s) + ' (' + count + ' คน)</option>';
+    });
+
+    const swalHtml = '' +
+        '<div style="text-align:left; font-family:Kanit; font-size:13px; line-height:1.6; color:#334155;">' +
+            '<div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px; margin-bottom:14px;">' +
+                '<div style="font-weight:700; color:#1e40af; font-size:14px; margin-bottom:4px;">' +
+                    '<i class="fas fa-info-circle"></i> สรุปข้อมูลเด็กในพื้นที่ระบาด อ.เทพา' +
+                '</div>' +
+                '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12.5px; color:#1e3a8a;">' +
+                    '<div>• เด็กทั้งหมด: <strong>' + allUniqueChildren.length + '</strong> คน</div>' +
+                    '<div>• ระบุโรงเรียนแล้ว: <strong>' + totalAssignedChildren + '</strong> คน</div>' +
+                    '<div>• โรงเรียน/ศพด. ที่พบ: <strong>' + schoolNames.length + '</strong> แห่ง</div>' +
+                    '<div>• ยังไม่ระบุโรงเรียน: <strong>' + unassignedChildren.length + '</strong> คน</div>' +
+                '</div>' +
+            '</div>' +
+
+            '<div style="font-weight:600; margin-bottom:8px; color:#1e293b;">' +
+                'เลือกรูปแบบที่ต้องการส่งออก:' +
+            '</div>' +
+
+            '<!-- แบบที่ 1: เล่มรวมแยก Sheet -->' +
+            '<div style="border:1.5px solid #3b82f6; border-radius:10px; padding:12px; margin-bottom:12px; background:#f8fafc; cursor:pointer;" onclick="document.getElementById(\'optAllSheets\').checked = true;">' +
+                '<label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-weight:600; color:#1e40af;">' +
+                    '<input type="radio" name="schoolExportOpt" id="optAllSheets" value="all_sheets" checked style="margin-top:3px;">' +
+                    '<div>' +
+                        '<div>📦 รวมเล่ม Excel เล่มเดียว (แยก Sheet รายโรงเรียน) <span style="background:#2563eb; color:white; font-size:10px; padding:1px 6px; border-radius:6px; margin-left:4px;">แนะนำสำหรับ สสอ.</span></div>' +
+                        '<div style="font-weight:normal; font-size:11.5px; color:#64748b; margin-top:2px;">' +
+                            'รวมทุกโรงเรียนในไฟล์เดียว โดย Sheet ที่ 1 เป็นสรุปยอดรวม และ Sheet ถัดไปแยกเป็นรายโรงเรียน/ศพด. แต่ละแห่ง พร้อมช่องให้ครูบันทึกผลติดตาม' +
+                        '</div>' +
+                    '</div>' +
+                '</label>' +
+            '</div>' +
+
+            '<!-- แบบที่ 2: เลือกเฉพาะโรงเรียนเดียว -->' +
+            '<div style="border:1px solid #cbd5e1; border-radius:10px; padding:12px; background:#fff; cursor:pointer;" onclick="document.getElementById(\'optSingleSchool\').checked = true;">' +
+                '<label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-weight:600; color:#334155;">' +
+                    '<input type="radio" name="schoolExportOpt" id="optSingleSchool" value="single_school" style="margin-top:3px;">' +
+                    '<div style="flex:1;">' +
+                        '<div>📄 ส่งออกเฉพาะโรงเรียนที่เลือก (ไฟล์เดี่ยว)</div>' +
+                        '<div style="font-weight:normal; font-size:11.5px; color:#64748b; margin-top:2px; margin-bottom:6px;">' +
+                            'เลือกโรงเรียน/ศพด. ที่ต้องการ เพื่อดาวน์โหลดไฟล์ Excel เฉพาะของโรงเรียนนั้นไปส่งมอบ' +
+                        '</div>' +
+                        '<select id="swalSelectSchool" style="width:100%; padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:Kanit; font-size:12.5px;" onclick="event.stopPropagation(); document.getElementById(\'optSingleSchool\').checked = true;">' +
+                            schoolOptionsHtml +
+                            '<option value="__unassigned__">⚠️ ยังไม่ได้ระบุโรงเรียน (' + unassignedChildren.length + ' คน)</option>' +
+                        '</select>' +
+                    '</div>' +
+                '</label>' +
+            '</div>' +
+        '</div>';
+
+    const { value: result } = await Swal.fire({
+        title: '<div style="font-size:18px; font-weight:700; color:#1e293b; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-school" style="color:#2563eb;"></i> ส่งออกทะเบียนวัคซีนคอตีบ แยกรายโรงเรียน</div>',
+        html: swalHtml,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-file-download"></i> ดาวน์โหลดไฟล์ Excel',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#2563eb',
+        cancelButtonColor: '#94a3b8',
+        focusConfirm: false,
+        preConfirm: () => {
+            const opt = document.querySelector('input[name="schoolExportOpt"]:checked');
+            const mode = opt ? opt.value : 'all_sheets';
+            const singleSchool = document.getElementById('swalSelectSchool') ? document.getElementById('swalSelectSchool').value : '';
+            return { mode: mode, singleSchool: singleSchool };
+        }
+    });
+
+    if (!result) return;
+
+    showLoading('กำลังจัดทำไฟล์ Excel แยกรายโรงเรียน...');
+
+    try {
+        const today = new Date();
+        const thaiDateStr = today.getDate() + '/' + (today.getMonth() + 1) + '/' + (today.getFullYear() + 543);
+        const wb = XLSX.utils.book_new();
+
+        // ฟังก์ชันช่วยสร้างโครงสร้างตารางของแต่ละโรงเรียน
+        function generateSchoolSheetData(schoolTitle, list) {
+            const rows = [
+                ['รายงานตรวจสอบและติดตามเด็กขาดวัคซีนคอตีบ (DTP Outbreak Response) — ' + schoolTitle],
+                ['สำหรับสถานศึกษา / ศูนย์พัฒนาเด็กเล็ก (ศพด.) ใช้ในการติดตามร่วมกับ สสอ.เทพา และ รพ.สต. ในพื้นที่'],
+                ['วันที่ออกรายงาน: ' + thaiDateStr + ' | จำนวนเด็กที่ต้องติดตามในโรงเรียนนี้: ' + list.length + ' คน'],
+                [],
+                [
+                    'ลำดับ', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ-นามสกุลเด็ก', 'โรงเรียน / ศพด.',
+                    'ว/ด/ปเกิด', 'อายุปัจจุบัน', 'บ้านเลขที่', 'หมู่ที่', 'ตำบล', 'เบอร์โทรศัพท์ผู้ปกครอง',
+                    'DTP1 (2ด.)', 'DTP2 (4ด.)', 'DTP3 (6ด.)', 'DTP4 (18ด.)', 'DTP5 (4ปี)',
+                    'เข็มที่ขาด/ต้องฉีดเร่งรัด', 'สถานพยาบาลที่รับผิดชอบ', 'ผลการติดตามของโรงเรียน/ครู (บันทึกข้อมูล)'
+                ]
+            ];
+
+            list.forEach((c, idx) => {
+                const facName = (typeof getFacilityDisplayName === 'function') ? getFacilityDisplayName(c.hcode, c.hname) : (c.hname || c.hcode);
+                const missedStr = (c.missedDoses && c.missedDoses.length > 0) ? c.missedDoses.join(', ') : 'ขาดวัคซีน';
+                rows.push([
+                    idx + 1,
+                    String(c.cid || c.id || ''),
+                    c.hn || '',
+                    c.fullname || '',
+                    (c.school && c.school !== '-') ? c.school : 'ยังไม่ระบุ',
+                    c.birthDate || '',
+                    c.age || '',
+                    c.houseNumber || '',
+                    c.village || '',
+                    c.subdistrict || '',
+                    c.phone || '',
+                    c.dtp1 && c.dtp1.given ? c.dtp1.date : (c.dtp1 && c.dtp1.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
+                    c.dtp2 && c.dtp2.given ? c.dtp2.date : (c.dtp2 && c.dtp2.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
+                    c.dtp3 && c.dtp3.given ? c.dtp3.date : (c.dtp3 && c.dtp3.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
+                    c.dtp4 && c.dtp4.given ? c.dtp4.date : (c.dtp4 && c.dtp4.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
+                    c.dtp5 && c.dtp5.given ? c.dtp5.date : (c.dtp5 && c.dtp5.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
+                    missedStr,
+                    facName,
+                    '' // ช่องว่างให้คุณครูหรือเจ้าหน้าที่บันทึกผล
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            ws['!merges'] = [
+                { s: { r: 0, c: 0 }, e: { r: 0, c: 18 } },
+                { s: { r: 1, c: 0 }, e: { r: 1, c: 18 } },
+                { s: { r: 2, c: 0 }, e: { r: 2, c: 18 } }
+            ];
+            ws['!cols'] = [
+                { wch: 6 },   // ลำดับ
+                { wch: 19 },  // CID
+                { wch: 12 },  // HN
+                { wch: 25 },  // ชื่อเด็ก
+                { wch: 24 },  // โรงเรียน
+                { wch: 13 },  // วันเกิด
+                { wch: 13 },  // อายุ
+                { wch: 10 },  // บ้านเลขที่
+                { wch: 8 },   // หมู่
+                { wch: 14 },  // ตำบล
+                { wch: 16 },  // เบอร์โทร
+                { wch: 12 },  // DTP1
+                { wch: 12 },  // DTP2
+                { wch: 12 },  // DTP3
+                { wch: 12 },  // DTP4
+                { wch: 12 },  // DTP5
+                { wch: 20 },  // เข็มที่ขาด
+                { wch: 26 },  // สถานพยาบาล
+                { wch: 30 }   // ผลการติดตามของโรงเรียน
+            ];
+            return ws;
+        }
+
+        function sanitizeSheetName(name, existingNames) {
+            let clean = String(name || 'Sheet').replace(/[/\\?*\[\]:]/g, ' ').trim().slice(0, 31);
+            if (!clean) clean = 'Sheet';
+            let finalName = clean;
+            let counter = 2;
+            while (existingNames.has(finalName)) {
+                const suffix = ' (' + counter + ')';
+                finalName = clean.slice(0, 31 - suffix.length) + suffix;
+                counter++;
+            }
+            existingNames.add(finalName);
+            return finalName;
+        }
+
+        let outFileName = '';
+
+        if (result.mode === 'single_school') {
+            // โหมดส่งออกเฉพาะโรงเรียนเดียว
+            const targetSchoolName = result.singleSchool;
+            const targetList = (targetSchoolName === '__unassigned__')
+                ? unassignedChildren
+                : (schoolGroups.get(targetSchoolName) || []);
+
+            const displayName = (targetSchoolName === '__unassigned__') ? 'ยังไม่ได้ระบุโรงเรียน' : targetSchoolName;
+            const ws = generateSchoolSheetData(displayName, targetList);
+            const sheetName = sanitizeSheetName(displayName, new Set());
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+            const safeName = displayName.replace(/[/\\?%*:|"<>]/g, '_');
+            outFileName = 'รายชื่อเด็กขาดวัคซีนคอตีบ_' + safeName + '_อ.เทพา_' + today.toISOString().slice(0, 10) + '.xlsx';
+        } else {
+            // โหมดรวมเล่มแยก Sheet รายโรงเรียนทั้งหมด
+            const usedSheetNames = new Set();
+
+            // 1. Sheet สรุปภาพรวมรายโรงเรียน
+            const summaryRows = [
+                ['สรุปภาพรวมเด็กขาดวัคซีนคอตีบ แยกตามโรงเรียนและศูนย์พัฒนาเด็กเล็ก (ศพด.)'],
+                ['พื้นที่ระบาดโรคคอตีบ อำเภอเทพา จังหวัดสงขลา | ข้อมูลสำหรับ สสอ.เทพา'],
+                ['วันที่ประมวลผล: ' + thaiDateStr + ' | จำนวนโรงเรียน/ศพด. ที่พบเด็ก: ' + schoolNames.length + ' แห่ง | เด็กทั้งหมด: ' + allUniqueChildren.length + ' คน'],
+                [],
+                ['ลำดับ', 'ชื่อโรงเรียน / ศูนย์พัฒนาเด็กเล็ก (ศพด.)', 'จำนวนเด็กที่ต้องติดตาม (คน)', 'ขาด DTP1', 'ขาด DTP2', 'ขาด DTP3', 'ขาด DTP4', 'ขาด DTP5', 'สัดส่วน (%)']
+            ];
+
+            schoolNames.forEach((sName, sIdx) => {
+                const sList = schoolGroups.get(sName) || [];
+                let m1 = 0, m2 = 0, m3 = 0, m4 = 0, m5 = 0;
+                sList.forEach(c => {
+                    if (c.missedDoses) {
+                        if (c.missedDoses.includes('DTP1')) m1++;
+                        if (c.missedDoses.includes('DTP2')) m2++;
+                        if (c.missedDoses.includes('DTP3')) m3++;
+                        if (c.missedDoses.includes('DTP4')) m4++;
+                        if (c.missedDoses.includes('DTP5')) m5++;
+                    }
+                });
+                const pct = allUniqueChildren.length > 0 ? ((sList.length / allUniqueChildren.length) * 100).toFixed(1) + '%' : '0%';
+                summaryRows.push([sIdx + 1, sName, sList.length, m1, m2, m3, m4, m5, pct]);
+            });
+
+            // เพิ่มแถวยังไม่ระบุโรงเรียน
+            if (unassignedChildren.length > 0) {
+                let u1 = 0, u2 = 0, u3 = 0, u4 = 0, u5 = 0;
+                unassignedChildren.forEach(c => {
+                    if (c.missedDoses) {
+                        if (c.missedDoses.includes('DTP1')) u1++;
+                        if (c.missedDoses.includes('DTP2')) u2++;
+                        if (c.missedDoses.includes('DTP3')) u3++;
+                        if (c.missedDoses.includes('DTP4')) u4++;
+                        if (c.missedDoses.includes('DTP5')) u5++;
+                    }
+                });
+                const uPct = allUniqueChildren.length > 0 ? ((unassignedChildren.length / allUniqueChildren.length) * 100).toFixed(1) + '%' : '0%';
+                summaryRows.push([schoolNames.length + 1, '⚠️ ยังไม่ได้ระบุโรงเรียน/ศพด.', unassignedChildren.length, u1, u2, u3, u4, u5, uPct]);
+            }
+
+            // แถวรวมสุทธิ
+            summaryRows.push(['', 'รวมทั้งสิ้น (อำเภอเทพา)', allUniqueChildren.length, '', '', '', '', '', '100%']);
+
+            const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+            wsSummary['!merges'] = [
+                { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
+                { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } },
+                { s: { r: 2, c: 0 }, e: { r: 2, c: 8 } }
+            ];
+            wsSummary['!cols'] = [
+                { wch: 8 },   // ลำดับ
+                { wch: 35 },  // ชื่อโรงเรียน
+                { wch: 24 },  // จำนวนเด็ก
+                { wch: 10 },  // DTP1
+                { wch: 10 },  // DTP2
+                { wch: 10 },  // DTP3
+                { wch: 10 },  // DTP4
+                { wch: 10 },  // DTP5
+                { wch: 14 }   // สัดส่วน
+            ];
+            const summarySheetName = sanitizeSheetName('ภาพรวมสรุปรายโรงเรียน', usedSheetNames);
+            XLSX.utils.book_append_sheet(wb, wsSummary, summarySheetName);
+
+            // 2. Sheet แยกรายโรงเรียนแต่ละแห่ง
+            schoolNames.forEach(sName => {
+                const sList = schoolGroups.get(sName) || [];
+                const wsSchool = generateSchoolSheetData(sName, sList);
+                const sSheetName = sanitizeSheetName(sName, usedSheetNames);
+                XLSX.utils.book_append_sheet(wb, wsSchool, sSheetName);
+            });
+
+            // 3. Sheet เด็กที่ยังไม่ได้ระบุโรงเรียน
+            if (unassignedChildren.length > 0) {
+                const wsUnassigned = generateSchoolSheetData('ยังไม่ได้ระบุโรงเรียน/ศพด.', unassignedChildren);
+                const uSheetName = sanitizeSheetName('ยังไม่ระบุโรงเรียน', usedSheetNames);
+                XLSX.utils.book_append_sheet(wb, wsUnassigned, uSheetName);
+            }
+
+            outFileName = 'ทะเบียนเด็กขาดวัคซีนคอตีบ_แยกรายโรงเรียน_เทพา_' + today.toISOString().slice(0, 10) + '.xlsx';
+        }
+
+        XLSX.writeFile(wb, outFileName);
+        hideLoading();
+
+        Swal.fire({
+            icon: 'success',
+            title: 'ส่งออกไฟล์ Excel สำเร็จ!',
+            html: '<div style="font-family:Kanit; font-size:14px; text-align:left; color:#334155;">' +
+                    '<p style="margin-bottom:6px;">บันทึกไฟล์: <strong style="color:#2563eb;">' + esc(outFileName) + '</strong></p>' +
+                    '<p style="margin:0; font-size:13px; color:#64748b;">' +
+                        (result.mode === 'all_sheets' 
+                            ? 'ประกอบด้วย ' + (schoolNames.length + 2) + ' Sheet (ภาพรวมสรุป + แยก ' + schoolNames.length + ' โรงเรียน + ยังไม่ระบุ)'
+                            : 'ส่งออกเฉพาะโรงเรียน ' + esc(result.singleSchool) + ' สำเร็จ') +
+                    '</p>' +
+                '</div>',
+            timer: 4500,
+            showConfirmButton: true,
+            confirmButtonText: 'ตกลง',
+            confirmButtonColor: '#2563eb'
+        });
+    } catch (err) {
+        console.error('exportDtpBySchoolExcel error:', err);
+        hideLoading();
+        Swal.fire('ผิดพลาด', 'ไม่สามารถส่งออกไฟล์ Excel ได้: ' + err.message, 'error');
+    }
+};
+
     console.log('✅ ระบบติดตามวัคซีนเด็ก 0-5 ปี พร้อมทำงาน');
 </script>
 
