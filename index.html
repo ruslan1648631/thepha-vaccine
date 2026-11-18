@@ -26,7 +26,6 @@
 
     <!-- ===== SUPABASE JS SDK ===== -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
     <style>
         /* ============================================================
            GLOBAL STYLES
@@ -25430,7 +25429,8 @@ function printDtpOutreachSheet() {
             </div>
         </body>
         </html>
-    `);
+
+`);
     printWin.document.close();
 }
 
@@ -26362,6 +26362,224 @@ function printDtpOutreachSheet() {
         }
     }
 
+    
+    // ============================================================
+    // ระบบระบุและจัดการโรงเรียน/ศพด. สำหรับรายงานติดตามวัคซีนคอตีบ
+    // ============================================================
+    const DTP_THEPHA_SCHOOLS = [
+        'ศพด.บ้านท่าม่วง', 'ศพด.บ้านทุ่งโดน', 'ศพด.บ้านลำไพล', 'ศพด.บ้านตูหยง', 'ศพด.บ้านตาแปด',
+        'ศพด.บ้านเกาะสะบ้า', 'ศพด.บ้านท่าไทร', 'ศพด.บ้านพรุชิง', 'ศพด.บ้านวังใหญ่', 'ศพด.บ้านสะกอม',
+        'ศพด.บ้านท่าแมงลัก', 'ศพด.เทศบาลตำบลเทพา', 'ศพด.อบต.ท่าม่วง', 'ศพด.อบต.ลำไพล', 'ศพด.อบต.สะกอม',
+        'โรงเรียนชุมชนบ้านเทพา', 'โรงเรียนบ้านท่าม่วง', 'โรงเรียนบ้านทุ่งโดน', 'โรงเรียนบ้านลำไพล',
+        'โรงเรียนบ้านตูหยง', 'โรงเรียนบ้านตาแปด', 'โรงเรียนบ้านเกาะสะบ้า', 'โรงเรียนบ้านพรุชิง',
+        'โรงเรียนบ้านสะกอม', 'โรงเรียนบ้านวังใหญ่', 'โรงเรียนบ้านท่าแมงลัก', 'โรงเรียนบ้านท่าไทร',
+        'โรงเรียนบ้านควนหรัง', 'โรงเรียนบ้านกะโผะ', 'โรงเรียนบ้านแม่ที', 'โรงเรียนบ้านปากบางสะกอม',
+        'โรงเรียนอนุบาลเทพา', 'โรงเรียนบำรุงวิทย์', 'โรงเรียนสายสินวิทยา', 'โรงเรียนมุสลิมวิทยามูลนิธิ'
+    ];
+
+    window.openEditDtpSchoolModal = async function(cid, childName, currentSchool) {
+        const existingSchools = new Set(DTP_THEPHA_SCHOOLS);
+        (window.DTP_RAW_CHILDREN || []).forEach(c => {
+            if (c.school && c.school.trim() && c.school !== '-') existingSchools.add(c.school.trim());
+        });
+        const schoolList = Array.from(existingSchools).sort((a, b) => a.localeCompare(b, 'th'));
+        const optionsDatalist = schoolList.map(s => `<option value="${esc(s)}"></option>`).join('');
+
+        const { value: formValues } = await Swal.fire({
+            title: '<div style="font-size:18px; font-weight:700; color:#1e293b; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-school" style="color:#2563eb;"></i> ระบุโรงเรียน / ศูนย์พัฒนาเด็กเล็ก (ศพด.)</div>',
+            html: `
+                <div style="text-align:left; font-family:Kanit; font-size:13px; line-height:1.6; margin-top:8px;">
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin-bottom:14px;">
+                        <div style="font-weight:700; color:#0f172a; font-size:14px;">${esc(childName)}</div>
+                        <div style="color:#64748b; font-size:12px; margin-top:2px;">เลขบัตร ปชช. (CID): <strong>${esc(cid || '-')}</strong></div>
+                    </div>
+                    <label style="font-weight:600; color:#334155; display:block; margin-bottom:6px;">
+                        ชื่อโรงเรียน หรือ ศูนย์พัฒนาเด็กเล็ก (ศพด.) ที่เด็กเรียน:
+                    </label>
+                    <input list="schoolSuggestionsList" id="swalSchoolInput" class="swal2-input" 
+                           style="width:100%; box-sizing:border-box; margin:0 0 12px 0; font-family:Kanit; font-size:14px;" 
+                           placeholder="พิมพ์ชื่อโรงเรียน หรือคลิกเลือกจากรายการแนะนำ..." 
+                           value="${esc(currentSchool || '')}" autocomplete="off">
+                    <datalist id="schoolSuggestionsList">
+                        ${optionsDatalist}
+                    </datalist>
+                    <div style="font-size:12px; color:#64748b;">
+                        💡 สามารถพิมพ์ชื่อโรงเรียน/ศพด. หรือคลิกเลือกจากรายการแนะนำได้ทันที
+                    </div>
+                </div>
+            `,
+            focusConfirm: false,
+            showCancelButton: true,
+            showDenyButton: Boolean(currentSchool),
+            confirmButtonText: '<i class="fas fa-save"></i> บันทึกข้อมูล',
+            denyButtonText: '<i class="fas fa-eraser"></i> ล้างข้อมูล (ไม่ระบุ)',
+            cancelButtonText: 'ยกเลิก',
+            confirmButtonColor: '#2563eb',
+            denyButtonColor: '#94a3b8',
+            cancelButtonColor: '#cbd5e1',
+            preConfirm: () => {
+                const input = document.getElementById('swalSchoolInput');
+                return input ? input.value.trim() : '';
+            }
+        });
+
+        if (formValues === undefined) return;
+
+        let newSchool = formValues;
+        if (formValues === false) {
+            newSchool = '';
+        }
+
+        showLoading('กำลังบันทึกข้อมูลโรงเรียน...');
+        try {
+            const childObj = (window.DTP_RAW_CHILDREN || []).find(c => c.cid === cid || c.id === cid);
+            const res = await callGAS('saveChildSchool', [{
+                cid: cid,
+                hn: childObj ? childObj.hn : '',
+                fullname: childName,
+                village: childObj ? childObj.village : '',
+                school: newSchool
+            }]);
+
+            hideLoading();
+
+            if (res && res.success) {
+                if (childObj) childObj.school = newSchool;
+                (window.DTP_FILTERED_CHILDREN || []).forEach(c => {
+                    if (c.cid === cid || c.id === cid) c.school = newSchool;
+                });
+
+                populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
+                renderDtpTargetTable();
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'บันทึกสำเร็จ!',
+                    text: newSchool ? `ระบุโรงเรียน "${newSchool}" เรียบร้อยแล้ว` : 'ล้างข้อมูลโรงเรียนเรียบร้อยแล้ว',
+                    timer: 1800,
+                    showConfirmButton: false
+                });
+            } else {
+                Swal.fire('ผิดพลาด', res ? res.message : 'ไม่สามารถบันทึกข้อมูลโรงเรียนได้', 'error');
+            }
+        } catch (err) {
+            hideLoading();
+            console.error('saveChildSchool error:', err);
+            Swal.fire('ผิดพลาด', err.message, 'error');
+        }
+    };
+
+    window.openDtpBatchSchoolModal = async function() {
+        if (!window.DTP_FILTERED_CHILDREN || window.DTP_FILTERED_CHILDREN.length === 0) {
+            return Swal.fire('แจ้งเตือน', 'ไม่มีรายชื่อเด็กในตารางปัจจุบัน', 'info');
+        }
+
+        const currentVillage = document.getElementById('dtpVillage') ? document.getElementById('dtpVillage').value : 'ทั้งหมด';
+        const villageText = currentVillage !== 'ทั้งหมด' ? `หมู่ที่ ${currentVillage}` : 'ทุกหมู่บ้าน';
+
+        const existingSchools = new Set(DTP_THEPHA_SCHOOLS);
+        (window.DTP_RAW_CHILDREN || []).forEach(c => {
+            if (c.school && c.school.trim() && c.school !== '-') existingSchools.add(c.school.trim());
+        });
+        const schoolList = Array.from(existingSchools).sort((a, b) => a.localeCompare(b, 'th'));
+        const optionsDatalist = schoolList.map(s => `<option value="${esc(s)}"></option>`).join('');
+
+        const unassignedCount = window.DTP_FILTERED_CHILDREN.filter(c => !c.school || c.school === '-' || !c.school.trim()).length;
+
+        const { value: formValues } = await Swal.fire({
+            title: '<div style="font-size:18px; font-weight:700; color:#1e40af; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-users-cog"></i> ระบุโรงเรียนแบบกลุ่ม (Batch Assign)</div>',
+            html: `
+                <div style="text-align:left; font-family:Kanit; font-size:13px; line-height:1.6; margin-top:8px;">
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px; margin-bottom:14px;">
+                        <div>เป้าหมายในตารางขณะนี้: <strong>${window.DTP_FILTERED_CHILDREN.length} คน</strong> (${villageText})</div>
+                        <div style="color:#b91c1c; font-size:12.5px; margin-top:2px;">ยังไม่ได้ระบุโรงเรียน: <strong>${unassignedCount} คน</strong></div>
+                    </div>
+                    <label style="font-weight:600; color:#334155; display:block; margin-bottom:6px;">
+                        เลือกหรือพิมพ์ชื่อโรงเรียน / ศพด. ที่ต้องการกำหนด:
+                    </label>
+                    <input list="batchSchoolSuggestions" id="swalBatchSchoolInput" class="swal2-input" 
+                           style="width:100%; box-sizing:border-box; margin:0 0 12px 0; font-family:Kanit; font-size:14px;" 
+                           placeholder="พิมพ์ชื่อโรงเรียน หรือเลือกจากรายการแนะนำ..." autocomplete="off">
+                    <datalist id="batchSchoolSuggestions">
+                        ${optionsDatalist}
+                    </datalist>
+
+                    <div style="margin-top:10px; background:#f8fafc; border:1px solid #e2e8f0; padding:10px 12px; border-radius:8px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#334155;">
+                            <input type="radio" name="batchScope" value="unassigned" checked style="accent-color:#2563eb;">
+                            <span>เฉพาะเด็กที่ <strong>"ยังไม่ได้ระบุโรงเรียน"</strong> ในตาราง (${unassignedCount} คน)</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#334155; margin-top:6px;">
+                            <input type="radio" name="batchScope" value="all" style="accent-color:#2563eb;">
+                            <span>เด็กทั้งหมดในตารางนี้ (${window.DTP_FILTERED_CHILDREN.length} คน)</span>
+                        </label>
+                    </div>
+                </div>
+            `,
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: '<i class="fas fa-check-circle"></i> ยืนยันบันทึกทั้งกลุ่ม',
+            cancelButtonText: 'ยกเลิก',
+            confirmButtonColor: '#2563eb',
+            cancelButtonColor: '#94a3b8',
+            preConfirm: () => {
+                const sch = document.getElementById('swalBatchSchoolInput')?.value.trim();
+                const scope = document.querySelector('input[name="batchScope"]:checked')?.value || 'unassigned';
+                if (!sch) {
+                    Swal.showValidationMessage('กรุณาระบุชื่อโรงเรียน/ศพด.');
+                    return false;
+                }
+                return { school: sch, scope: scope };
+            }
+        });
+
+        if (!formValues) return;
+
+        const targetChildren = window.DTP_FILTERED_CHILDREN.filter(c => {
+            if (formValues.scope === 'unassigned') {
+                return !c.school || c.school === '-' || !c.school.trim();
+            }
+            return true;
+        });
+
+        if (targetChildren.length === 0) {
+            return Swal.fire('แจ้งเตือน', 'ไม่มีรายชื่อเด็กตามเงื่อนไขที่เลือก', 'info');
+        }
+
+        showLoading(`กำลังบันทึกโรงเรียนให้เด็ก ${targetChildren.length} คน...`);
+        let successCount = 0;
+        try {
+            for (const c of targetChildren) {
+                c.school = formValues.school;
+                await callGAS('saveChildSchool', [{
+                    cid: c.cid || c.id,
+                    hn: c.hn || '',
+                    fullname: c.fullname,
+                    village: c.village,
+                    school: formValues.school
+                }]);
+                successCount++;
+            }
+            hideLoading();
+
+            populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
+            renderDtpTargetTable();
+
+            Swal.fire({
+                icon: 'success',
+                title: 'บันทึกสำเร็จ!',
+                text: `บันทึกโรงเรียน "${formValues.school}" ให้เด็กสำเร็จรวม ${successCount} คน`,
+                timer: 2500,
+                showConfirmButton: false
+            });
+        } catch (err) {
+            hideLoading();
+            console.error('Batch school error:', err);
+            renderDtpTargetTable();
+            Swal.fire('ผิดพลาดบางส่วน', `บันทึกสำเร็จ ${successCount} คน, เกิดข้อผิดพลาด: ${err.message}`, 'warning');
+        }
+    };
+
     console.log('✅ ระบบติดตามวัคซีนเด็ก 0-5 ปี พร้อมทำงาน');
 </script>
 
@@ -26373,224 +26591,3 @@ function printDtpOutreachSheet() {
 
 </body>
 </html>
-
-// ============================================================
-// ระบบระบุและจัดการโรงเรียน/ศพด. สำหรับรายงานติดตามวัคซีนคอตีบ
-// ============================================================
-const DTP_THEPHA_SCHOOLS = [
-    'ศพด.บ้านท่าม่วง', 'ศพด.บ้านทุ่งโดน', 'ศพด.บ้านลำไพล', 'ศพด.บ้านตูหยง', 'ศพด.บ้านตาแปด',
-    'ศพด.บ้านเกาะสะบ้า', 'ศพด.บ้านท่าไทร', 'ศพด.บ้านพรุชิง', 'ศพด.บ้านวังใหญ่', 'ศพด.บ้านสะกอม',
-    'ศพด.บ้านท่าแมงลัก', 'ศพด.เทศบาลตำบลเทพา', 'ศพด.อบต.ท่าม่วง', 'ศพด.อบต.ลำไพล', 'ศพด.อบต.สะกอม',
-    'โรงเรียนชุมชนบ้านเทพา', 'โรงเรียนบ้านท่าม่วง', 'โรงเรียนบ้านทุ่งโดน', 'โรงเรียนบ้านลำไพล',
-    'โรงเรียนบ้านตูหยง', 'โรงเรียนบ้านตาแปด', 'โรงเรียนบ้านเกาะสะบ้า', 'โรงเรียนบ้านพรุชิง',
-    'โรงเรียนบ้านสะกอม', 'โรงเรียนบ้านวังใหญ่', 'โรงเรียนบ้านท่าแมงลัก', 'โรงเรียนบ้านท่าไทร',
-    'โรงเรียนบ้านควนหรัง', 'โรงเรียนบ้านกะโผะ', 'โรงเรียนบ้านแม่ที', 'โรงเรียนบ้านปากบางสะกอม',
-    'โรงเรียนอนุบาลเทพา', 'โรงเรียนบำรุงวิทย์', 'โรงเรียนสายสินวิทยา', 'โรงเรียนมุสลิมวิทยามูลนิธิ'
-];
-
-window.openEditDtpSchoolModal = async function(cid, childName, currentSchool) {
-    // รวบรวมรายชื่อโรงเรียนทั้งหมดที่มีในระบบ + รายชื่อโรงเรียนมาตรฐานในอำเภอเทพา
-    const existingSchools = new Set(DTP_THEPHA_SCHOOLS);
-    (window.DTP_RAW_CHILDREN || []).forEach(c => {
-        if (c.school && c.school.trim() && c.school !== '-') existingSchools.add(c.school.trim());
-    });
-    const schoolList = Array.from(existingSchools).sort((a, b) => a.localeCompare(b, 'th'));
-
-    const optionsDatalist = schoolList.map(s => `<option value="${esc(s)}"></option>`).join('');
-
-    const { value: formValues } = await Swal.fire({
-        title: '<div style="font-size:18px; font-weight:700; color:#1e293b; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-school" style="color:#2563eb;"></i> ระบุโรงเรียน / ศูนย์พัฒนาเด็กเล็ก (ศพด.)</div>',
-        html: `
-            <div style="text-align:left; font-family:Kanit; font-size:13px; line-height:1.6; margin-top:8px;">
-                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin-bottom:14px;">
-                    <div style="font-weight:700; color:#0f172a; font-size:14px;">${esc(childName)}</div>
-                    <div style="color:#64748b; font-size:12px; margin-top:2px;">เลขบัตร ปชช. (CID): <strong>${esc(cid || '-')}</strong></div>
-                </div>
-                <label style="font-weight:600; color:#334155; display:block; margin-bottom:6px;">
-                    ชื่อโรงเรียน หรือ ศูนย์พัฒนาเด็กเล็ก (ศพด.) ที่เด็กเรียน:
-                </label>
-                <input list="schoolSuggestionsList" id="swalSchoolInput" class="swal2-input" 
-                       style="width:100%; box-sizing:border-box; margin:0 0 12px 0; font-family:Kanit; font-size:14px;" 
-                       placeholder="พิมพ์ชื่อโรงเรียน หรือคลิกเลือกจากรายการแนะนำ..." 
-                       value="${esc(currentSchool || '')}" autocomplete="off">
-                <datalist id="schoolSuggestionsList">
-                    ${optionsDatalist}
-                </datalist>
-                <div style="font-size:12px; color:#64748b;">
-                    💡 สามารถพิมพ์ชื่อโรงเรียน/ศพด. หรือเลือกจากรายการที่พบบ่อยได้ทันที
-                </div>
-            </div>
-        `,
-        focusConfirm: false,
-        showCancelButton: true,
-        showDenyButton: Boolean(currentSchool),
-        confirmButtonText: '<i class="fas fa-save"></i> บันทึกข้อมูล',
-        denyButtonText: '<i class="fas fa-eraser"></i> ล้างข้อมูล (ไม่ระบุ)',
-        cancelButtonText: 'ยกเลิก',
-        confirmButtonColor: '#2563eb',
-        denyButtonColor: '#94a3b8',
-        cancelButtonColor: '#cbd5e1',
-        preConfirm: () => {
-            const input = document.getElementById('swalSchoolInput');
-            return input ? input.value.trim() : '';
-        }
-    });
-
-    if (formValues === undefined) return; // user cancelled
-
-    let newSchool = formValues;
-    if (formValues === false) {
-        // user clicked deny (ล้างข้อมูล)
-        newSchool = '';
-    }
-
-    showLoading('กำลังบันทึกข้อมูลโรงเรียน...');
-    try {
-        const childObj = (window.DTP_RAW_CHILDREN || []).find(c => c.cid === cid || c.id === cid);
-        const res = await callGAS('saveChildSchool', [{
-            cid: cid,
-            hn: childObj ? childObj.hn : '',
-            fullname: childName,
-            village: childObj ? childObj.village : '',
-            school: newSchool
-        }]);
-
-        hideLoading();
-
-        if (res && res.success) {
-            // อัปเดตในหน่วยความจำทันที
-            if (childObj) childObj.school = newSchool;
-            (window.DTP_FILTERED_CHILDREN || []).forEach(c => {
-                if (c.cid === cid || c.id === cid) c.school = newSchool;
-            });
-
-            populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
-            renderDtpTargetTable();
-
-            Swal.fire({
-                icon: 'success',
-                title: 'บันทึกสำเร็จ!',
-                text: newSchool ? `ระบุโรงเรียน "${newSchool}" เรียบร้อยแล้ว` : 'ล้างข้อมูลโรงเรียนเรียบร้อยแล้ว',
-                timer: 1800,
-                showConfirmButton: false
-            });
-        } else {
-            Swal.fire('ผิดพลาด', res ? res.message : 'ไม่สามารถบันทึกข้อมูลโรงเรียนได้', 'error');
-        }
-    } catch (err) {
-        hideLoading();
-        console.error('saveChildSchool error:', err);
-        Swal.fire('ผิดพลาด', err.message, 'error');
-    }
-};
-
-window.openDtpBatchSchoolModal = async function() {
-    if (!window.DTP_FILTERED_CHILDREN || window.DTP_FILTERED_CHILDREN.length === 0) {
-        return Swal.fire('แจ้งเตือน', 'ไม่มีรายชื่อเด็กในตารางปัจจุบัน', 'info');
-    }
-
-    const currentVillage = document.getElementById('dtpVillage') ? document.getElementById('dtpVillage').value : 'ทั้งหมด';
-    const villageText = currentVillage !== 'ทั้งหมด' ? `หมู่ที่ ${currentVillage}` : 'ทุกหมู่บ้าน';
-
-    const existingSchools = new Set(DTP_THEPHA_SCHOOLS);
-    (window.DTP_RAW_CHILDREN || []).forEach(c => {
-        if (c.school && c.school.trim() && c.school !== '-') existingSchools.add(c.school.trim());
-    });
-    const schoolList = Array.from(existingSchools).sort((a, b) => a.localeCompare(b, 'th'));
-    const optionsDatalist = schoolList.map(s => `<option value="${esc(s)}"></option>`).join('');
-
-    const unassignedCount = window.DTP_FILTERED_CHILDREN.filter(c => !c.school || c.school === '-' || !c.school.trim()).length;
-
-    const { value: formValues } = await Swal.fire({
-        title: '<div style="font-size:18px; font-weight:700; color:#1e40af; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-users-cog"></i> ระบุโรงเรียนแบบกลุ่ม (Batch Assign)</div>',
-        html: `
-            <div style="text-align:left; font-family:Kanit; font-size:13px; line-height:1.6; margin-top:8px;">
-                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px; margin-bottom:14px;">
-                    <div>เป้าหมายในตารางขณะนี้: <strong>${window.DTP_FILTERED_CHILDREN.length} คน</strong> (${villageText})</div>
-                    <div style="color:#b91c1c; font-size:12.5px; margin-top:2px;">ยังไม่ได้ระบุโรงเรียน: <strong>${unassignedCount} คน</strong></div>
-                </div>
-                <label style="font-weight:600; color:#334155; display:block; margin-bottom:6px;">
-                    เลือกหรือพิมพ์ชื่อโรงเรียน / ศพด. ที่ต้องการกำหนด:
-                </label>
-                <input list="batchSchoolSuggestions" id="swalBatchSchoolInput" class="swal2-input" 
-                       style="width:100%; box-sizing:border-box; margin:0 0 12px 0; font-family:Kanit; font-size:14px;" 
-                       placeholder="พิมพ์ชื่อโรงเรียน หรือเลือกจากรายการแนะนำ..." autocomplete="off">
-                <datalist id="batchSchoolSuggestions">
-                    ${optionsDatalist}
-                </datalist>
-
-                <div style="margin-top:10px; background:#f8fafc; border:1px solid #e2e8f0; padding:10px 12px; border-radius:8px;">
-                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#334155;">
-                        <input type="radio" name="batchScope" value="unassigned" checked style="accent-color:#2563eb;">
-                        <span>เฉพาะเด็กที่ <strong>"ยังไม่ได้ระบุโรงเรียน"</strong> ในตาราง (${unassignedCount} คน)</span>
-                    </label>
-                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#334155; margin-top:6px;">
-                        <input type="radio" name="batchScope" value="all" style="accent-color:#2563eb;">
-                        <span>เด็กทั้งหมดในตารางนี้ (${window.DTP_FILTERED_CHILDREN.length} คน)</span>
-                    </label>
-                </div>
-            </div>
-        `,
-        focusConfirm: false,
-        showCancelButton: true,
-        confirmButtonText: '<i class="fas fa-check-circle"></i> ยืนยันบันทึกทั้งกลุ่ม',
-        cancelButtonText: 'ยกเลิก',
-        confirmButtonColor: '#2563eb',
-        cancelButtonColor: '#94a3b8',
-        preConfirm: () => {
-            const sch = document.getElementById('swalBatchSchoolInput')?.value.trim();
-            const scope = document.querySelector('input[name="batchScope"]:checked')?.value || 'unassigned';
-            if (!sch) {
-                Swal.showValidationMessage('กรุณาระบุชื่อโรงเรียน/ศพด.');
-                return false;
-            }
-            return { school: sch, scope: scope };
-        }
-    });
-
-    if (!formValues) return;
-
-    const targetChildren = window.DTP_FILTERED_CHILDREN.filter(c => {
-        if (formValues.scope === 'unassigned') {
-            return !c.school || c.school === '-' || !c.school.trim();
-        }
-        return true;
-    });
-
-    if (targetChildren.length === 0) {
-        return Swal.fire('แจ้งเตือน', 'ไม่มีรายชื่อเด็กตามเงื่อนไขที่เลือก', 'info');
-    }
-
-    showLoading(`กำลังบันทึกโรงเรียนให้เด็ก ${targetChildren.length} คน...`);
-    let successCount = 0;
-    try {
-        for (const c of targetChildren) {
-            c.school = formValues.school;
-            await callGAS('saveChildSchool', [{
-                cid: c.cid || c.id,
-                hn: c.hn || '',
-                fullname: c.fullname,
-                village: c.village,
-                school: formValues.school
-            }]);
-            successCount++;
-        }
-        hideLoading();
-
-        populateDtpSchoolDropdown(window.DTP_RAW_CHILDREN);
-        renderDtpTargetTable();
-
-        Swal.fire({
-            icon: 'success',
-            title: 'บันทึกสำเร็จ!',
-            text: `บันทึกโรงเรียน "${formValues.school}" ให้เด็กสำเร็จรวม ${successCount} คน`,
-            timer: 2500,
-            showConfirmButton: false
-        });
-    } catch (err) {
-        hideLoading();
-        console.error('Batch school error:', err);
-        renderDtpTargetTable();
-        Swal.fire('ผิดพลาดบางส่วน', `บันทึกสำเร็จ ${successCount} คน, เกิดข้อผิดพลาด: ${err.message}`, 'warning');
-    }
-};
