@@ -6614,6 +6614,31 @@
                 }
             });
 
+            // ดึงข้อมูลโรงเรียน/ศพด. จาก VCC_tracking
+            const schoolMap = new Map();
+            try {
+                const { data: trackSchools } = await supabaseClient
+                    .from('VCC_tracking')
+                    .select('ChildId, ChildName, Remarks, Vaccine, Status, Timestamp')
+                    .or('Status.eq.ระบุโรงเรียน,Vaccine.eq.SCHOOL')
+                    .order('Timestamp', { ascending: false });
+                if (trackSchools && trackSchools.length > 0) {
+                    trackSchools.forEach(ts => {
+                        const idKey = String(ts.ChildId || '').trim();
+                        const nameKey = String(ts.ChildName || '').trim();
+                        const sch = String(ts.Remarks || '').trim();
+                        if (idKey && idKey !== '0' && !schoolMap.has(idKey)) {
+                            schoolMap.set(idKey, sch);
+                        }
+                        if (nameKey && !schoolMap.has(nameKey)) {
+                            schoolMap.set(nameKey, sch);
+                        }
+                    });
+                }
+            } catch (eSch) {
+                console.warn('getPcvTargetReport: could not fetch schools from VCC_tracking', eSch);
+            }
+
             // Deduplicate & Merge PCV Target Children
             const childMap = new Map();
 
@@ -24012,8 +24037,14 @@ async function fetchAndRenderPcvData(forceRefresh = false) {
                 });
             }
             PCV_RAW_CHILDREN = list;
+            window.PCV_RAW_CHILDREN = list;
         } else {
+            console.error('getPcvTargetReport failed:', res ? res.message : 'Unknown error');
             PCV_RAW_CHILDREN = [];
+            window.PCV_RAW_CHILDREN = [];
+            if (res && res.message) {
+                Swal.fire('แจ้งเตือน', 'เกิดข้อผิดพลาดในการประมวลผล: ' + res.message, 'error');
+            }
         }
 
         const nowStr = new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
