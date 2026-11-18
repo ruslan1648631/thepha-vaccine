@@ -24531,6 +24531,9 @@ async function loadDtpReportPage() {
                     <button id="dtpExportBySchoolBtn" class="btn" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(37,99,235,0.3); transition:all 0.2s;">
                         <i class="fas fa-school"></i> ส่งออกแยกรายโรงเรียน
                     </button>
+                    <button id="dtpTelegramBtn" class="btn" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(2,132,199,0.3); transition:all 0.2s;" title="แจ้งรายงานผลและข้อสั่งการเข้า Telegram ทุกวัน 09.00 น.">
+                        <i class="fab fa-telegram-plane"></i> แจ้งเตือนเข้า Telegram
+                    </button>
                 </div>
             </div>
 
@@ -24794,6 +24797,8 @@ async function loadDtpReportPage() {
         document.getElementById('dtpExportBtn').addEventListener('click', exportDtpExcel);
         const schoolExpBtn = document.getElementById('dtpExportBySchoolBtn');
         if (schoolExpBtn) schoolExpBtn.addEventListener('click', exportDtpBySchoolExcel);
+        const dtpTgBtn = document.getElementById('dtpTelegramBtn');
+        if (dtpTgBtn) dtpTgBtn.addEventListener('click', () => sendDtpOutbreakToTelegram(false));
         document.getElementById('dtpPrintOutreachBtn').addEventListener('click', printDtpOutreachSheet);
 
     } catch (err) {
@@ -26845,6 +26850,602 @@ window.exportDtpBySchoolExcel = async function() {
         Swal.fire('ผิดพลาด', 'ไม่สามารถส่งออกไฟล์ Excel ได้: ' + err.message, 'error');
     }
 };
+
+    
+    // ============================================================
+    // ระบบแจ้งเตือนผลการติดตามแผนเร่งรัดและเฝ้าระวังวัคซีนคอตีบเข้า TELEGRAM
+    // สรุปผลรายสถานพยาบาล + ข้อสั่งการ สสอ.เทพา (ข้อความ + ภาพ Infographic)
+    // ส่งทุกวันเวลา 09:00 น. อัตโนมัติ + ส่งด้วยตนเอง
+    // ============================================================
+    const DTP_TG_BOT_TOKEN = '8758808567:AAFoP_pRaWcZkWILgPTlHFYXwpwZP2OW1B4';
+    const DTP_TG_CHAT_ID = '-5333140982';
+
+    // รายการข้อสั่งการมาตรฐาน สสอ.เทพา 5 ข้อ
+    const DEFAULT_DTP_DIRECTIVES = [
+        '1. 🎯 เร่งรัดฉีดกลุ่ม DTP1-DTP3 (เด็กอายุ < 1 ปี) ถือเป็นกลุ่มเป้าหมายวิกฤต ติดตามฉีดทันทีภายใน 7 วัน',
+        '2. 🚪 เจ้าหน้าที่ รพ.สต. ร่วมกับ อสม. ประจำโซน ลงพื้นที่เคาะประตูบ้านตามรายชื่อเด็กขาดนัดเป็นรายบุคคล',
+        '3. 🏫 ใช้ทะเบียนรายชื่อเด็กแยกรายโรงเรียน/ศพด. ประสานครูประจำชั้นร่วมติดตามเด็กขาดเข็มกระตุ้น (DTP4-DTP5)',
+        '4. 🤝 กรณีผู้ปกครองปฏิเสธ ให้ทีมสุขภาพร่วมกับผู้นำชุมชน/โต๊ะอิหม่าม ชี้แจงความเสี่ยงและสร้างความเข้าใจ',
+        '5. 📝 บันทึกข้อมูลการฉีดและการติดตามลงระบบทันที เพื่อประเมินความครอบคลุมรายวัน'
+    ];
+
+    // สรุปข้อมูลสำหรับ Telegram (ข้อความ + โครงสร้างข้อมูลสำหรับ Canvas)
+    function buildDtpTelegramSummaryData(childrenList, customDirectivesArr) {
+        const facMap = new Map();
+        let totalTarget = (childrenList || []).length;
+        let totalComplete = 0;
+        let totalMissed = 0;
+        let totalRefused = 0;
+        let totalNotDue = 0;
+        let totalD1 = 0, totalD2 = 0, totalD3 = 0, totalD4 = 0, totalD5 = 0;
+
+        (childrenList || []).forEach(c => {
+            const facKey = c.hcode || 'other';
+            const facName = c.hname || c.hcode || 'ไม่ระบุสถานพยาบาล';
+
+            if (!facMap.has(facKey)) {
+                facMap.set(facKey, {
+                    hcode: facKey,
+                    name: facName,
+                    total: 0,
+                    complete: 0,
+                    missed: 0,
+                    refused: 0,
+                    notDue: 0,
+                    d1: 0, d2: 0, d3: 0, d4: 0, d5: 0
+                });
+            }
+
+            const f = facMap.get(facKey);
+            f.total++;
+
+            if (c.statusCode === 'complete') {
+                f.complete++;
+                totalComplete++;
+            } else if (c.statusCode === 'missed') {
+                f.missed++;
+                totalMissed++;
+            } else if (c.statusCode === 'refused') {
+                f.refused++;
+                totalRefused++;
+            } else if (c.statusCode === 'not_due') {
+                f.notDue++;
+                totalNotDue++;
+            }
+
+            if (c.dtp1 && c.dtp1.isDue && !c.dtp1.given) { f.d1++; totalD1++; }
+            if (c.dtp2 && c.dtp2.isDue && !c.dtp2.given) { f.d2++; totalD2++; }
+            if (c.dtp3 && c.dtp3.isDue && !c.dtp3.given) { f.d3++; totalD3++; }
+            if (c.dtp4 && c.dtp4.isDue && !c.dtp4.given) { f.d4++; totalD4++; }
+            if (c.dtp5 && c.dtp5.isDue && !c.dtp5.given) { f.d5++; totalD5++; }
+        });
+
+        const evaluatedTarget = totalTarget - totalNotDue;
+        const overallCoverage = evaluatedTarget > 0 ? ((totalComplete / evaluatedTarget) * 100).toFixed(1) : '0.0';
+
+        // จัดเรียงสถานพยาบาลตามจำนวนเด็กขาดวัคซีน (มากไปน้อย) เพื่อให้เห็นจุดที่ต้องเร่งรัดก่อน
+        const facList = Array.from(facMap.values()).sort((a, b) => b.missed - a.missed || b.total - a.total);
+
+        const today = new Date();
+        const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+        const thaiDateStr = today.getDate() + ' ' + thaiMonths[today.getMonth()] + ' ' + (today.getFullYear() + 543);
+
+        const directivesArr = (Array.isArray(customDirectivesArr) && customDirectivesArr.length > 0)
+            ? customDirectivesArr
+            : DEFAULT_DTP_DIRECTIVES;
+
+        // ข้อความสรุปแบบ HTML
+        let msg = '🚨 <b>รายงานติดตามแผนเร่งรัดและเฝ้าระวังวัคซีนคอตีบ (DTP Outbreak Response)</b>\n';
+        msg += '📍 <b>อำเภอเทพา จังหวัดสงขลา</b>\n';
+        msg += '🗓 ข้อมูลประจำวันที่ <b>' + thaiDateStr + '</b> เวลา 09:00 น.\n';
+        msg += '─────────────────────────\n';
+        msg += '📊 <b>ภาพรวมทั้งอำเภอ:</b>\n';
+        msg += '• เด็กเป้าหมายประเมิน: <b>' + evaluatedTarget.toLocaleString() + '</b> คน\n';
+        msg += '• ได้รับครบถ้วน: <b>' + totalComplete.toLocaleString() + '</b> คน (<b>' + overallCoverage + '%</b>)\n';
+        msg += '• ขาดวัคซีนต้องเร่งรัด: <b>' + totalMissed.toLocaleString() + '</b> คน\n';
+        msg += '• กลุ่มปฏิเสธวัคซีน: <b>' + totalRefused.toLocaleString() + '</b> คน\n';
+        msg += '• ยังไม่ถึงเกณฑ์: <b>' + totalNotDue.toLocaleString() + '</b> คน\n\n';
+
+        msg += '💉 <b>เด็กขาดวัคซีนแยกตามรายเข็ม:</b>\n';
+        msg += '• DTP1 (2 ด.): <b>' + totalD1 + '</b> คน\n';
+        msg += '• DTP2 (4 ด.): <b>' + totalD2 + '</b> คน\n';
+        msg += '• DTP3 (6 ด.): <b>' + totalD3 + '</b> คน\n';
+        msg += '• DTP4 (18 ด.): <b>' + totalD4 + '</b> คน\n';
+        msg += '• DTP5 (4 ปี): <b>' + totalD5 + '</b> คน\n';
+        msg += '─────────────────────────\n';
+        msg += '🏥 <b>สรุปผลรายสถานพยาบาล (เรียงตามจำนวนเด็กขาดวัคซีน):</b>\n';
+
+        facList.forEach((f, idx) => {
+            const fEval = f.total - f.notDue;
+            const fCov = fEval > 0 ? ((f.complete / fEval) * 100).toFixed(0) : '0';
+            const badge = f.missed === 0 ? '🟢' : (f.missed <= 5 ? '🟡' : '🔴');
+            msg += badge + ' <b>' + (idx + 1) + '. ' + f.name + '</b>\n';
+            msg += '   ขาด: <b>' + f.missed + '</b> คน | ครบ: ' + f.complete + ' (' + fCov + '%) | ขาดรายเข็ม: [D1:' + f.d1 + ', D2:' + f.d2 + ', D3:' + f.d3 + ', D4:' + f.d4 + ', D5:' + f.d5 + ']\n';
+        });
+
+        msg += '─────────────────────────\n';
+        msg += '📢 <b>ข้อสั่งการจาก สสอ.เทพา เพื่อการเร่งรัดติดตาม:</b>\n';
+        directivesArr.forEach(d => {
+            msg += '<b>' + d.replace(/^([0-9]+\.\s*)/, '$1') + '</b>\n';
+        });
+        msg += '─────────────────────────\n';
+        msg += '<i>ระบบติดตามวัคซีนเด็ก 0-5 ปี (VCC) อำเภอเทพา</i>';
+
+        const caption = '🚨 <b>สรุปแผนเร่งรัดและเฝ้าระวังวัคซีนคอตีบ (DTP Outbreak Response) อ.เทพา</b>\n' +
+            '🗓 ประจำวันที่ ' + thaiDateStr + ' เวลา 09:00 น.\n' +
+            '📊 เป้าหมาย: <b>' + evaluatedTarget.toLocaleString() + '</b> คน | ครบ: <b>' + totalComplete.toLocaleString() + '</b> (' + overallCoverage + '%) | ขาดเร่งรัด: <b>' + totalMissed.toLocaleString() + '</b> คน | ปฏิเสธ: <b>' + totalRefused.toLocaleString() + '</b> คน';
+
+        return {
+            msg: msg,
+            caption: caption,
+            facList: facList,
+            directivesArr: directivesArr,
+            thaiDateStr: thaiDateStr,
+            totals: {
+                totalTarget: totalTarget,
+                evaluatedTarget: evaluatedTarget,
+                totalComplete: totalComplete,
+                totalMissed: totalMissed,
+                totalRefused: totalRefused,
+                totalNotDue: totalNotDue,
+                totalD1: totalD1,
+                totalD2: totalD2,
+                totalD3: totalD3,
+                totalD4: totalD4,
+                totalD5: totalD5,
+                overallCoverage: overallCoverage
+            }
+        };
+    }
+
+    // สร้างรูปภาพ Infographic ด้วย HTML5 Canvas เพื่อส่งเข้า Telegram เป็นรูปภาพ
+    async function createDtpInfographicBlob(totals, facList, thaiDateStr, directivesArr) {
+        const width = 1040;
+        const baseHeight = 530;
+        const rowHeight = 36;
+        const tableHeight = (facList.length + 1) * rowHeight;
+        const directivesHeight = (directivesArr.length * 28) + 80;
+        const totalHeight = baseHeight + tableHeight + directivesHeight + 40;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = totalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+
+        // พื้นหลังรวม
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(0, 0, width, totalHeight);
+
+        // Header แถบสี Gradient
+        const grad = ctx.createLinearGradient(0, 0, width, 140);
+        grad.addColorStop(0, '#1e3a8a');
+        grad.addColorStop(1, '#0284c7');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, 140);
+
+        // ข้อความหัวรายงาน
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 26px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('รายงานติดตามแผนเร่งรัดและเฝ้าระวังวัคซีนคอตีบ (DTP Outbreak Response)', 40, 48);
+
+        ctx.fillStyle = '#bae6fd';
+        ctx.font = '16px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('พื้นที่ระบาดโรคคอตีบ อำเภอเทพา จังหวัดสงขลา | เกณฑ์ สธ. ปี 2569 (EPI MOPH 2569)', 40, 82);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '14px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('ข้อมูลประจำวันที่: ' + thaiDateStr + ' เวลา 09:00 น. | ออกรายงานโดย: สสอ.เทพา', 40, 114);
+
+        // กล่องสรุปตัวเลขหลัก (KPI Cards 5 กล่อง)
+        const kpiY = 160;
+        const kpiW = 180;
+        const kpiH = 88;
+        const kpis = [
+            { label: 'เป้าหมายประเมิน', val: totals.evaluatedTarget, unit: 'คน', bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af' },
+            { label: 'ฉีดครบถ้วน', val: totals.totalComplete, unit: 'คน', bg: '#ecfdf5', border: '#a7f3d0', text: '#065f46' },
+            { label: 'ขาดวัคซีนเร่งรัด', val: totals.totalMissed, unit: 'คน', bg: '#fef2f2', border: '#fecaca', text: '#991b1b' },
+            { label: 'กลุ่มปฏิเสธ', val: totals.totalRefused, unit: 'คน', bg: '#fff7ed', border: '#fed7aa', text: '#9a3412' },
+            { label: 'ความครอบคลุม', val: totals.overallCoverage + '%', unit: '', bg: '#f0fdf4', border: '#86efac', text: '#15803d' }
+        ];
+
+        kpis.forEach((k, i) => {
+            const x = 40 + i * (kpiW + 15);
+            ctx.fillStyle = k.bg;
+            ctx.strokeStyle = k.border;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect ? ctx.roundRect(x, kpiY, kpiW, kpiH, 10) : ctx.rect(x, kpiY, kpiW, kpiH);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#64748b';
+            ctx.font = '13px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(k.label, x + 14, kpiY + 28);
+
+            ctx.fillStyle = k.text;
+            ctx.font = 'bold 26px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(String(k.val), x + 14, kpiY + 64);
+
+            if (k.unit) {
+                const valWidth = ctx.measureText(String(k.val)).width;
+                ctx.fillStyle = '#64748b';
+                ctx.font = '13px Kanit, "Sarabun", sans-serif';
+                ctx.fillText(k.unit, x + 14 + valWidth + 6, kpiY + 64);
+            }
+        });
+
+        // แถบสรุปรายเข็มที่ขาด (Dose Breakdown Bar)
+        const doseY = 270;
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(40, doseY, 960, 56, 10) : ctx.rect(40, doseY, 960, 56);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 14px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('จำนวนเด็กขาดวัคซีนแยกรายเข็ม (อำเภอเทพา):', 58, doseY + 34);
+
+        const doseItems = [
+            { name: 'DTP1 (2ด.):', count: totals.totalD1, color: '#ef4444' },
+            { name: 'DTP2 (4ด.):', count: totals.totalD2, color: '#f97316' },
+            { name: 'DTP3 (6ด.):', count: totals.totalD3, color: '#f59e0b' },
+            { name: 'DTP4 (18ด.):', count: totals.totalD4, color: '#8b5cf6' },
+            { name: 'DTP5 (4ปี):', count: totals.totalD5, color: '#06b6d4' }
+        ];
+        let doseX = 390;
+        doseItems.forEach(d => {
+            ctx.fillStyle = '#475569';
+            ctx.font = '13px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(d.name, doseX, doseY + 34);
+            const lblW = ctx.measureText(d.name).width;
+
+            ctx.fillStyle = d.color;
+            ctx.font = 'bold 15px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(String(d.count) + ' คน', doseX + lblW + 5, doseY + 34);
+
+            doseX += lblW + ctx.measureText(String(d.count) + ' คน').width + 18;
+        });
+
+        // ตารางสรุปผลรายสถานพยาบาล
+        const tblY = 345;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 17px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('สรุปผลการติดตามจำแนกรายสถานพยาบาล (เรียงตามจำนวนเด็กขาดวัคซีน):', 40, tblY);
+
+        // Header ตาราง
+        const thY = tblY + 15;
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(40, thY, 960, 36);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 13px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('ลำดับ', 52, thY + 23);
+        ctx.fillText('สถานพยาบาล', 105, thY + 23);
+        ctx.fillText('เป้าหมาย', 380, thY + 23);
+        ctx.fillText('ครบถ้วน', 460, thY + 23);
+        ctx.fillText('ขาด (เร่งรัด)', 540, thY + 23);
+        ctx.fillText('ความครอบคลุม', 635, thY + 23);
+        ctx.fillText('ขาดรายเข็ม (D1 - D5)', 750, thY + 23);
+
+        let rowY = thY + 36;
+        facList.forEach((f, idx) => {
+            ctx.fillStyle = (idx % 2 === 0) ? '#ffffff' : '#f8fafc';
+            ctx.fillRect(40, rowY, 960, rowHeight);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.strokeRect(40, rowY, 960, rowHeight);
+
+            // สถานะจุดสี
+            const dotColor = f.missed === 0 ? '#10b981' : (f.missed <= 5 ? '#f59e0b' : '#ef4444');
+            ctx.fillStyle = dotColor;
+            ctx.beginPath();
+            ctx.arc(58, rowY + 18, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#334155';
+            ctx.font = '13px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(String(idx + 1), 74, rowY + 23);
+
+            ctx.fillStyle = '#0f172a';
+            ctx.font = '500 13px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(f.name, 105, rowY + 23);
+
+            ctx.fillStyle = '#334155';
+            ctx.fillText(String(f.total - f.notDue), 395, rowY + 23);
+            ctx.fillText(String(f.complete), 475, rowY + 23);
+
+            ctx.fillStyle = f.missed > 0 ? '#dc2626' : '#15803d';
+            ctx.font = 'bold 13px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(String(f.missed), 565, rowY + 23);
+
+            const fEval = f.total - f.notDue;
+            const fCov = fEval > 0 ? Math.round((f.complete / fEval) * 100) : 0;
+            ctx.fillStyle = '#047857';
+            ctx.font = '13px Kanit, "Sarabun", sans-serif';
+            ctx.fillText(String(fCov) + '%', 665, rowY + 23);
+
+            ctx.fillStyle = '#64748b';
+            ctx.font = '12px Kanit, "Sarabun", sans-serif';
+            const doseBreakdownStr = 'D1:' + f.d1 + '  D2:' + f.d2 + '  D3:' + f.d3 + '  D4:' + f.d4 + '  D5:' + f.d5;
+            ctx.fillText(doseBreakdownStr, 750, rowY + 23);
+
+            rowY += rowHeight;
+        });
+
+        // แถวรวมสรุปตาราง
+        ctx.fillStyle = '#f1f5f9';
+        ctx.fillRect(40, rowY, 960, rowHeight);
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.strokeRect(40, rowY, 960, rowHeight);
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 13.5px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('รวมทั้งสิ้น (อำเภอเทพา)', 105, rowY + 23);
+        ctx.fillText(String(totals.evaluatedTarget), 395, rowY + 23);
+        ctx.fillText(String(totals.totalComplete), 475, rowY + 23);
+
+        ctx.fillStyle = '#dc2626';
+        ctx.fillText(String(totals.totalMissed), 565, rowY + 23);
+
+        ctx.fillStyle = '#047857';
+        ctx.fillText(String(totals.overallCoverage) + '%', 665, rowY + 23);
+
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 12px Kanit, "Sarabun", sans-serif';
+        const totalDoseStr = 'D1:' + totals.totalD1 + '  D2:' + totals.totalD2 + '  D3:' + totals.totalD3 + '  D4:' + totals.totalD4 + '  D5:' + totals.totalD5;
+        ctx.fillText(totalDoseStr, 750, rowY + 23);
+
+        // กล่องข้อสั่งการ สสอ.เทพา
+        const dirY = rowY + 50;
+        ctx.fillStyle = '#eff6ff';
+        ctx.strokeStyle = '#93c5fd';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(40, dirY, 960, directivesHeight, 12) : ctx.rect(40, dirY, 960, directivesHeight);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#1e40af';
+        ctx.font = 'bold 16px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('📢 ข้อสั่งการจาก สสอ.เทพา ในการควบคุมโรคคอตีบและเร่งรัดวัคซีน:', 60, dirY + 34);
+
+        let ptY = dirY + 68;
+        ctx.fillStyle = '#1e3a8a';
+        ctx.font = '13.5px Kanit, "Sarabun", sans-serif';
+        directivesArr.forEach(pt => {
+            ctx.fillText(pt, 65, ptY);
+            ptY += 28;
+        });
+
+        // ท้ายรูปภาพ (Footer)
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '12px Kanit, "Sarabun", sans-serif';
+        ctx.fillText('ระบบติดตามวัคซีนเด็ก 0-5 ปี (VCC) อำเภอเทพา จังหวัดสงขลา | อ้างอิงเกณฑ์ EPI MOPH 2569', 40, totalHeight - 16);
+
+        return new Promise(resolve => {
+            canvas.toBlob(blob => resolve(blob), 'image/png');
+        });
+    }
+
+    // ฟังก์ชันส่งรายงานติดตามวัคซีนคอตีบเข้า Telegram (ทั้งรูปภาพ Infographic และข้อความสรุป)
+    async function sendDtpOutbreakToTelegram(isAuto = false, customDirectivesArr = null) {
+        if (!isAuto) {
+            showLoading('กำลังเตรียมข้อมูลรายงานวัคซีนคอตีบ...');
+        }
+        try {
+            // ดึงข้อมูลเด็กจากระบบ
+            let children = window.DTP_RAW_CHILDREN;
+            if (!children || children.length === 0) {
+                const res = await callGAS('getDtpOutbreakReport', [{
+                    hcode: 'ทั้งหมด',
+                    type: 'in_area',
+                    userRole: APP.currentUser ? APP.currentUser.role : 'admin_ampur',
+                    userHcode: APP.currentUser ? APP.currentUser.hcode : ''
+                }]);
+                if (res && res.success && res.children) {
+                    children = res.children;
+                    window.DTP_RAW_CHILDREN = children;
+                } else {
+                    children = [];
+                }
+            }
+
+            if (!children || children.length === 0) {
+                if (!isAuto) {
+                    hideLoading();
+                    Swal.fire('ไม่พบข้อมูล', 'ไม่พบรายชื่อเด็กในรายงานวัคซีนคอตีบ', 'info');
+                }
+                return { success: false, message: 'ไม่มีข้อมูลเด็ก' };
+            }
+
+            let directives = (Array.isArray(customDirectivesArr) && customDirectivesArr.length > 0)
+                ? customDirectivesArr
+                : DEFAULT_DTP_DIRECTIVES;
+
+            const summaryData = buildDtpTelegramSummaryData(children, directives);
+
+            // หากเป็นการกดส่งด้วยตนเอง (Manual) ให้แสดงหน้าต่าง Preview พร้อมให้แก้ไขข้อสั่งการได้
+            if (!isAuto) {
+                hideLoading();
+                const defaultDirText = directives.join('\n');
+
+                const previewResult = await Swal.fire({
+                    title: '<div style="display:flex; align-items:center; justify-content:center; gap:8px; font-size:18px; color:#0284c7; font-weight:700;"><i class="fab fa-telegram-plane"></i> แจ้งเตือนรายงานวัคซีนคอตีบเข้า Telegram</div>',
+                    html: `
+                        <div style="text-align:left; font-family:'Kanit',sans-serif; font-size:13.5px; line-height:1.6; color:#334155;">
+                            <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px; padding:12px; margin-bottom:12px;">
+                                <div style="font-weight:700; color:#0369a1; margin-bottom:6px;">
+                                    📊 สรุปข้อมูล อ.เทพา ประจำวันที่ ${summaryData.thaiDateStr}
+                                </div>
+                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12.5px;">
+                                    <div>• เป้าหมายประเมิน: <b>${summaryData.totals.evaluatedTarget.toLocaleString()}</b> คน</div>
+                                    <div>• ฉีดครบถ้วน: <b>${summaryData.totals.totalComplete.toLocaleString()}</b> คน (<b>${summaryData.totals.overallCoverage}%</b>)</div>
+                                    <div>• ขาดวัคซีนเรังรัด: <b style="color:#dc2626;">${summaryData.totals.totalMissed.toLocaleString()}</b> คน</div>
+                                    <div>• กลุ่มปฏิเสธ: <b style="color:#ea580c;">${summaryData.totals.totalRefused.toLocaleString()}</b> คน</div>
+                                </div>
+                                <div style="margin-top:6px; font-size:12px; color:#64748b;">
+                                    • สถานพยาบาลในอำเภอ: <b>${summaryData.facList.length}</b> แห่ง
+                                </div>
+                            </div>
+
+                            <label style="font-weight:600; color:#0f172a; display:block; margin-bottom:4px;">
+                                📢 ข้อสั่งการจาก สสอ.เทพา (สามารถแก้ไขข้อความก่อนส่งได้):
+                            </label>
+                            <textarea id="tgDtpDirectivesInput" class="swal2-textarea" 
+                                      style="width:100%; height:130px; box-sizing:border-box; margin:0 0 10px 0; font-family:'Kanit',sans-serif; font-size:12.5px; line-height:1.5; padding:8px;" 
+                                      placeholder="พิมพ์ข้อสั่งการแต่ละข้อขึ้นบรรทัดใหม่...">${defaultDirText}</textarea>
+
+                            <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:8px 12px; font-size:12px; color:#991b1b; display:flex; align-items:center; gap:8px;">
+                                <i class="fas fa-camera" style="font-size:15px; color:#dc2626;"></i>
+                                <span>ระบบจะส่งทั้ง <b>รูปภาพ Infographic สรุปผลราย รพ.สต.</b> และ <b>ข้อความรายงานสรุป</b> เข้ากลุ่ม Telegram</span>
+                            </div>
+                        </div>
+                    `,
+                    width: 620,
+                    showCancelButton: true,
+                    confirmButtonText: '<i class="fab fa-telegram-plane"></i> ยืนยันส่ง Telegram ทันที',
+                    cancelButtonText: 'ยกเลิก',
+                    confirmButtonColor: '#0284c7',
+                    cancelButtonColor: '#94a3b8',
+                    preConfirm: () => {
+                        const txt = document.getElementById('tgDtpDirectivesInput').value || '';
+                        const lines = txt.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                        return lines.length > 0 ? lines : DEFAULT_DTP_DIRECTIVES;
+                    }
+                });
+
+                if (!previewResult.isConfirmed) return { cancelled: true };
+                directives = previewResult.value;
+                showLoading('กำลังส่งรายงานวัคซีนคอตีบ (ภาพ + ข้อความ) เข้า Telegram...');
+            }
+
+            // คำนวณข้อมูลใหม่ด้วยข้อสั่งการที่ผู้ใช้ระบุ
+            const finalData = buildDtpTelegramSummaryData(children, directives);
+
+            // 1. สร้างรูปภาพ Infographic เป็น PNG Blob
+            let photoBlob = null;
+            try {
+                photoBlob = await createDtpInfographicBlob(finalData.totals, finalData.facList, finalData.thaiDateStr, finalData.directivesArr);
+            } catch (blobErr) {
+                console.warn('Canvas infographic generation error:', blobErr);
+            }
+
+            let photoOk = false;
+            let msgOk = false;
+
+            // 2. ส่งรูปภาพพร้อม Caption เข้า Telegram (ถ้าสร้าง Blob สำเร็จ)
+            if (photoBlob) {
+                try {
+                    const formData = new FormData();
+                    formData.append('chat_id', DTP_TG_CHAT_ID);
+                    formData.append('photo', photoBlob, 'dtp_outbreak_thepha_' + Date.now() + '.png');
+                    formData.append('caption', finalData.caption);
+                    formData.append('parse_mode', 'HTML');
+
+                    const photoRes = await fetch('https://api.telegram.org/bot' + DTP_TG_BOT_TOKEN + '/sendPhoto', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const photoJson = await photoRes.json();
+                    photoOk = photoJson && photoJson.ok;
+                    if (!photoOk) console.warn('Telegram sendPhoto error:', photoJson);
+                } catch (pe) {
+                    console.warn('Telegram sendPhoto network error:', pe);
+                }
+            }
+
+            // 3. ส่งข้อความรายงานแบบละเอียดและข้อสั่งการ (sendMessage)
+            const textRes = await fetch('https://api.telegram.org/bot' + DTP_TG_BOT_TOKEN + '/sendMessage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: DTP_TG_CHAT_ID,
+                    text: finalData.msg,
+                    parse_mode: 'HTML'
+                })
+            });
+            const textJson = await textRes.json();
+            msgOk = textJson && textJson.ok;
+
+            if (!isAuto) {
+                hideLoading();
+            }
+
+            if (msgOk || photoOk) {
+                const today = new Date();
+                const todayYmd = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+                localStorage.setItem('vcc_last_dtp_tg_sent_date', todayYmd);
+
+                if (typeof logActivity === 'function') {
+                    logActivity('TELEGRAM', 'notify', 'ส่งรายงานติดตามวัคซีนคอตีบ (DTP Outbreak Response) เข้า Telegram (ภาพ: ' + (photoOk ? 'สำเร็จ' : 'ไม่สำเร็จ') + ', ข้อความ: สำเร็จ)');
+                }
+
+                if (!isAuto) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'ส่ง Telegram สำเร็จ!',
+                        html: '<div style="font-family:Kanit; font-size:14px; text-align:left; color:#334155;">' +
+                                '<p style="margin-bottom:6px;">✅ ส่งรายงานผลและข้อสั่งการ สสอ.เทพา ประจำวันที่ <b>' + finalData.thaiDateStr + '</b> เรียบร้อยแล้ว</p>' +
+                                '<p style="margin:0; font-size:12.5px; color:#64748b;">• สถานะรูปภาพ: ' + (photoOk ? '<span style="color:#10b981;">ส่งภาพ Infographic แล้ว</span>' : '<span style="color:#f59e0b;">ส่งเฉพาะข้อความ</span>') + '</p>' +
+                              '</div>',
+                        timer: 3500,
+                        showConfirmButton: true,
+                        confirmButtonText: 'ตกลง',
+                        confirmButtonColor: '#0284c7'
+                    });
+                }
+                return { success: true, photoOk: photoOk, msgOk: msgOk };
+            } else {
+                console.error('Telegram API error:', textJson);
+                if (!isAuto) {
+                    Swal.fire('ส่งไม่สำเร็จ', (textJson && textJson.description) || 'ไม่สามารถส่งข้อความเข้า Telegram ได้', 'error');
+                }
+                return { success: false, ok: false, error: textJson ? textJson.description : 'Unknown error' };
+            }
+        } catch (err) {
+            console.error('sendDtpOutbreakToTelegram error:', err);
+            if (!isAuto) {
+                hideLoading();
+                Swal.fire('ส่งไม่สำเร็จ', 'เกิดข้อผิดพลาดในการเชื่อมต่อ Telegram: ' + err.message, 'error');
+            }
+            return { success: false, error: err.message };
+        }
+    }
+    window.sendDtpOutbreakToTelegram = sendDtpOutbreakToTelegram;
+
+    // ระบบตรวจสอบและส่งรายงานอัตโนมัติทุกวันเวลา 09:00 น.
+    function checkDailyDtpTelegramAlertAuto() {
+        try {
+            const today = new Date();
+            // ตรวจสอบว่าถึงเวลา 09:00 น. หรือยัง
+            if (today.getHours() < 9) return;
+
+            const todayYmd = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+            const lastSent = localStorage.getItem('vcc_last_dtp_tg_sent_date');
+            if (lastSent === todayYmd) return; // วันนี้ส่งไปแล้ว
+
+            if (typeof isAdminAmpurUser === 'function' && isAdminAmpurUser()) {
+                console.log('🔔 ถึงเวลา 09:00 น.: กำลังส่งรายงานติดตามวัคซีนคอตีบอัตโนมัติเข้า Telegram...');
+                sendDtpOutbreakToTelegram(true).then(res => {
+                    if (res && res.success) {
+                        localStorage.setItem('vcc_last_dtp_tg_sent_date', todayYmd);
+                        console.log('✅ ส่งรายงานติดตามวัคซีนคอตีบเข้า Telegram ประจำวันเวลา 09:00 น. สำเร็จ');
+                    }
+                }).catch(e => console.warn('Auto DTP Telegram error:', e));
+            }
+        } catch (e) {
+            console.warn('checkDailyDtpTelegramAlertAuto error:', e);
+        }
+    }
+    window.checkDailyDtpTelegramAlertAuto = checkDailyDtpTelegramAlertAuto;
+
+    // ตรวจสอบทุก 1 นาที สำหรับการส่งอัตโนมัติเวลา 09:00 น.
+    setInterval(checkDailyDtpTelegramAlertAuto, 60000);
+    // ตรวจสอบทันทีเมื่อโหลดระบบ
+    setTimeout(checkDailyDtpTelegramAlertAuto, 4000);
 
     console.log('✅ ระบบติดตามวัคซีนเด็ก 0-5 ปี พร้อมทำงาน');
 </script>
