@@ -7183,22 +7183,94 @@
             };
             const allRows = await fetchAllFromTable('data', '*', filterBuilder);
 
-            // ดึงข้อมูลกลุ่มปฏิเสธวัคซีนจากตาราง refused
-            let refusedRows = [];
+            // ดึงข้อมูลกลุ่มปฏิเสธวัคซีนจากตาราง VCC_tracking (และตาราง refused)
+            const refusedSet = new Set();
             try {
-                refusedRows = await fetchAllFromTable('refused', '*') || [];
+                // 1. ดึงจาก VCC_tracking ที่มี Status หรือ Remarks บ่งชี้ว่าปฏิเสธวัคซีน
+                const { data: trackRefused } = await supabaseClient
+                    .from('VCC_tracking')
+                    .select('ChildId, ChildName, Status, Remarks, Timestamp')
+                    .or('Status.ilike.%ปฏิเสธ%,Remarks.ilike.%ปฏิเสธ%')
+                    .order('Timestamp', { ascending: false });
+                if (trackRefused && trackRefused.length > 0) {
+                    trackRefused.forEach(t => {
+                        const rawId = String(t.ChildId || '').trim();
+                        const cleanId = rawId.replace(/\D/g, '').trim();
+                        const unpaddedId = cleanId.replace(/^0+/, '');
+                        const name = String(t.ChildName || '').trim();
+                        const normName = name.replace(/\s+/g, '');
+                        if (cleanId && cleanId !== '0') refusedSet.add(cleanId);
+                        if (unpaddedId && unpaddedId !== '0') refusedSet.add(unpaddedId);
+                        if (rawId && rawId !== '0' && rawId !== '-') refusedSet.add(rawId);
+                        if (name && name !== '-' && name !== '0') refusedSet.add(name);
+                        if (normName && normName !== '-' && normName !== '0') refusedSet.add(normName);
+                    });
+                }
+            } catch (eTrk) {
+                console.warn('getDtpOutbreakReport: could not fetch refusal from VCC_tracking (ilike)', eTrk);
+            }
+
+            // 2. สำรองด้วย .eq กรณีเงื่อนไขภาษาไทย
+            try {
+                const { data: trackRefEq } = await supabaseClient
+                    .from('VCC_tracking')
+                    .select('ChildId, ChildName, Status, Remarks')
+                    .eq('Status', 'ปฏิเสธวัคซีน');
+                if (trackRefEq && trackRefEq.length > 0) {
+                    trackRefEq.forEach(t => {
+                        const rawId = String(t.ChildId || '').trim();
+                        const cleanId = rawId.replace(/\D/g, '').trim();
+                        const unpaddedId = cleanId.replace(/^0+/, '');
+                        const name = String(t.ChildName || '').trim();
+                        const normName = name.replace(/\s+/g, '');
+                        if (cleanId && cleanId !== '0') refusedSet.add(cleanId);
+                        if (unpaddedId && unpaddedId !== '0') refusedSet.add(unpaddedId);
+                        if (rawId && rawId !== '0' && rawId !== '-') refusedSet.add(rawId);
+                        if (name && name !== '-' && name !== '0') refusedSet.add(name);
+                        if (normName && normName !== '-' && normName !== '0') refusedSet.add(normName);
+                    });
+                }
+            } catch (eTrkEq) {}
+
+            try {
+                const { data: trackRefEq2 } = await supabaseClient
+                    .from('VCC_tracking')
+                    .select('ChildId, ChildName, Status, Remarks')
+                    .eq('Status', 'ปฏิเสธ');
+                if (trackRefEq2 && trackRefEq2.length > 0) {
+                    trackRefEq2.forEach(t => {
+                        const rawId = String(t.ChildId || '').trim();
+                        const cleanId = rawId.replace(/\D/g, '').trim();
+                        const unpaddedId = cleanId.replace(/^0+/, '');
+                        const name = String(t.ChildName || '').trim();
+                        const normName = name.replace(/\s+/g, '');
+                        if (cleanId && cleanId !== '0') refusedSet.add(cleanId);
+                        if (unpaddedId && unpaddedId !== '0') refusedSet.add(unpaddedId);
+                        if (rawId && rawId !== '0' && rawId !== '-') refusedSet.add(rawId);
+                        if (name && name !== '-' && name !== '0') refusedSet.add(name);
+                        if (normName && normName !== '-' && normName !== '0') refusedSet.add(normName);
+                    });
+                }
+            } catch (eTrkEq2) {}
+
+            // 3. ดึงจากตาราง refused เพิ่มเติม (สำรองย้อนหลัง)
+            try {
+                const refusedRows = await fetchAllFromTable('refused', '*') || [];
+                (refusedRows || []).forEach(r => {
+                    const c = String(r.CID || r.cid || r.id || '').replace(/\D/g, '').trim();
+                    const unp = c.replace(/^0+/, '');
+                    const h = String(r.HN || r.hn || '').trim();
+                    const n = String(r.fullname || r.name || '').trim();
+                    const normN = n.replace(/\s+/g, '');
+                    if (c) refusedSet.add(c);
+                    if (unp) refusedSet.add(unp);
+                    if (h) refusedSet.add(h);
+                    if (n) refusedSet.add(n);
+                    if (normN) refusedSet.add(normN);
+                });
             } catch (eRef) {
                 console.warn('getDtpOutbreakReport: could not fetch refused table', eRef);
             }
-            const refusedSet = new Set();
-            (refusedRows || []).forEach(r => {
-                const c = String(r.CID || r.cid || r.id || '').replace(/\D/g, '').trim();
-                const h = String(r.HN || r.hn || '').trim();
-                const n = String(r.fullname || r.name || '').trim();
-                if (c) refusedSet.add(c);
-                if (h) refusedSet.add(h);
-                if (n) refusedSet.add(n);
-            });
 
             // ดึงข้อมูลโรงเรียน/ศพด. จาก VCC_tracking
             const schoolMap = new Map();
@@ -7283,9 +7355,18 @@
                 if (!ageDetail && now.getDate() < bd.getDate()) ageMonths--;
                 if (ageMonths < 0) ageMonths = 0;
 
-                // ตรวจสอบกลุ่มปฏิเสธวัคซีน
-                const isRefused = (refusedSet.has(cleanCid) || (rowHn && refusedSet.has(rowHn)) || (rowName && refusedSet.has(rowName)) ||
-                    String(row.status || row['สถานะ'] || '').includes('ปฏิเสธ'));
+                // ตรวจสอบกลุ่มปฏิเสธวัคซีน (ดึงจากตาราง VCC_tracking และ refused)
+                const unpaddedCid = cleanCid.replace(/^0+/, '');
+                const normName = rowName.replace(/\s+/g, '');
+                const isRefused = Boolean(
+                    (cleanCid && refusedSet.has(cleanCid)) ||
+                    (unpaddedCid && refusedSet.has(unpaddedCid)) ||
+                    (rowId && rowId !== '-' && rowId !== '0' && refusedSet.has(rowId)) ||
+                    (rowHn && rowHn !== '-' && rowHn !== '0' && refusedSet.has(rowHn)) ||
+                    (rowName && rowName !== '-' && rowName !== '0' && refusedSet.has(rowName)) ||
+                    (normName && normName !== '-' && normName !== '0' && refusedSet.has(normName)) ||
+                    String(row.status || row['สถานะ'] || '').includes('ปฏิเสธ')
+                );
 
                 // ประเมินวัคซีนคอตีบแต่ละเข็ม
                 const doseResults = {};
