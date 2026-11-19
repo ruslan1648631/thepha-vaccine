@@ -18177,19 +18177,79 @@ function updateBottomNavActive(page) {
         }
         page.classList.add('active');
 
-        showLoading('กำลังโหลดแบบฟอร์ม...');
+        showLoading('กำลังโหลดแบบฟอร์มติดตามวัคซีน...');
 
         try {
-            const villagesResult = await callGAS('getVillages', []);
-            const vaccineResult = await callGAS('getVaccineCatalog', []);
-            hideLoading();
+            const userRoleNorm = String((APP.currentUser && APP.currentUser.role) || '').toLowerCase().trim();
+            const isAdminAmpur = (userRoleNorm === 'admin_ampur' || userRoleNorm === 'admin');
+            const currentUserHcode = (APP.currentUser && APP.currentUser.hcode) ? String(APP.currentUser.hcode).trim() : '';
 
-            const villages = villagesResult.success ? villagesResult.villages : [];
+            // ดึง Facility Map และ Vaccine Catalog
+            const fRes = await callGAS('getFacilityMap', []);
+            if (fRes && fRes.success) {
+                APP.facilityMap = updateFacilityMap(fRes.map || {});
+            }
+            const vaccineResult = await callGAS('getVaccineCatalog', []);
             APP.vaccineCatalog = vaccineResult.success ? vaccineResult.catalog : [];
 
+            // กำหนดสถานพยาบาลเป้าหมาย (สำหรับกรองหมู่ที่เฉพาะสถานพยาบาลที่ล็อกอิน)
+            let targetHcode = currentUserHcode;
+            let facilitySelectorHtml = '';
+
+            if (isAdminAmpur) {
+                // สำหรับ Admin_Ampur ให้มี Dropdown เลือกสถานพยาบาล
+                const facList = [];
+                if (APP.facilityMap) {
+                    Object.keys(APP.facilityMap).forEach(k => {
+                        const fac = APP.facilityMap[k];
+                        if (fac && fac.name && !fac.name.includes('สสอ.') && !fac.name.includes('สำนักงานสาธารณสุขอำเภอ')) {
+                            facList.push({ code: k, name: fac.name });
+                        }
+                    });
+                }
+                if (facList.length > 0 && (!targetHcode || targetHcode === '00860' || targetHcode === '860')) {
+                    targetHcode = facList[0].code;
+                }
+
+                let facOpts = '';
+                facList.forEach(f => {
+                    const sel = (f.code === targetHcode) ? 'selected' : '';
+                    facOpts += '<option value="' + esc(f.code) + '" ' + sel + '>' + esc(f.name) + ' (' + esc(f.code) + ')</option>';
+                });
+
+                facilitySelectorHtml = `
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="font-weight:600; color:#1e293b;"><i class="fas fa-hospital" style="color:#0284c7;"></i> สถานพยาบาล <span class="required">*</span></label>
+                        <select id="officerFacility" onchange="officerOnFacilityChange()" style="width:100%; padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:14px; font-weight:500;">
+                            ${facOpts}
+                        </select>
+                        <small style="color:#64748b; font-size:12px; margin-top:3px; display:block;">เลือกสถานพยาบาลเพื่อแสดงหมู่บ้านเฉพาะของหน่วยบริการนั้น</small>
+                    </div>
+                `;
+            } else {
+                // สำหรับเจ้าหน้าที่ รพ.สต. ล็อกอิน แสดงชื่อสถานพยาบาลที่ปฏิบัติงาน
+                const facName = (APP.currentUser && APP.currentUser.hospital) 
+                    ? APP.currentUser.hospital 
+                    : (typeof getFacilityDisplayName === 'function' ? getFacilityDisplayName(targetHcode) : ('รพ.สต. รหัส ' + targetHcode));
+
+                facilitySelectorHtml = `
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="font-weight:600; color:#1e293b;"><i class="fas fa-hospital" style="color:#0284c7;"></i> สถานพยาบาลที่ปฏิบัติงาน</label>
+                        <div style="padding:9px 14px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; font-weight:600; color:#0369a1; font-size:14px; display:flex; align-items:center; gap:8px;">
+                            <i class="fas fa-check-circle" style="color:#0284c7;"></i>
+                            <span>${esc(facName)} (${esc(targetHcode || '-')})</span>
+                        </div>
+                        <input type="hidden" id="officerFacility" value="${esc(targetHcode)}">
+                    </div>
+                `;
+            }
+
+            // ดึงหมู่บ้านเฉพาะของสถานพยาบาลเป้าหมาย
+            const villages = await getOfficerVillagesForFacility(targetHcode);
+            hideLoading();
+
             let villageOptions = villages.map(function(v) {
-                const selected = (APP.currentUser.village && APP.currentUser.village !== '-' && APP
-                    .currentUser.village === v.name) ? 'selected' : '';
+                const selected = (APP.currentUser.village && APP.currentUser.village !== '-' && (APP.currentUser.village === v.name || APP.currentUser.village === v.no)) ? 'selected' : '';
                 return '<option value="' + esc(v.name) + '" ' + selected + '>' + esc(v.name) + '</option>';
             }).join('');
 
@@ -18199,43 +18259,66 @@ function updateBottomNavActive(page) {
             }).join('');
 
             page.innerHTML = `
-                <div class="page-title"><i class="fas fa-clipboard-list"></i> แบบฟอร์มติดตามวัคซีนเด็ก</div>
+                <div class="page-title"><i class="fas fa-clipboard-list" style="color:#0284c7;"></i> แบบฟอร์มติดตามวัคซีนเด็ก</div>
                 <div class="tracking-form-container">
-                    <div class="tracking-card">
-                        <h3><i class="fas fa-child"></i> ข้อมูลเด็ก</h3>
+                    <div class="tracking-card" style="border-top:4px solid #0284c7; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                        <h3><i class="fas fa-child" style="color:#0284c7;"></i> ข้อมูลเด็ก</h3>
+                        
+                        ${facilitySelectorHtml}
+
                         <div class="form-row-2">
+                            <!-- หมู่ที่ เฉพาะสถานพยาบาลที่ล็อกอิน -->
                             <div class="form-group">
-                                <label>หมู่ที่ <span class="required">*</span></label>
-                                <select id="officerVillage" onchange="officerClearChildInfo()">
+                                <label style="font-weight:600; color:#1e293b;">หมู่ที่ (เฉพาะสถานพยาบาลนี้) <span class="required">*</span></label>
+                                <select id="officerVillage" onchange="officerOnVillageChange()" style="width:100%; padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:14px;">
                                     <option value="">-- เลือกหมู่ที่ --</option>
                                     ${villageOptions}
                                 </select>
                             </div>
+
+                            <!-- ชื่อเด็กในหมู่ที่ (Dropdown พร้อมพิมพ์ค้นหาได้) -->
                             <div class="form-group">
-                                <label>ค้นหาเด็ก <span class="required">*</span></label>
-                                <div style="display: flex; gap: 8px;">
-                                    <input type="text" id="officerSearch" placeholder="เลขบัตร หรือ ชื่อ-สกุล" style="flex:1">
-                                    <button class="btn-search-child" onclick="officerSearchChild()"><i class="fas fa-search"></i> ค้นหา</button>
+                                <label style="font-weight:600; color:#1e293b;">
+                                    ชื่อเด็ก <span class="required">*</span> 
+                                    <span id="childCountBadge" style="font-size:12px; font-weight:normal; color:#0284c7; margin-left:4px;"></span>
+                                </label>
+                                <div style="display:flex; gap:8px;">
+                                    <input type="text" id="officerChildInput" list="officerChildDatalist" 
+                                           oninput="officerOnChildInputChange()" 
+                                           placeholder="คลิกเลือกชื่อเด็ก หรือพิมพ์ค้นหา..." 
+                                           style="flex:1; padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13.5px;" 
+                                           autocomplete="off">
+                                    <datalist id="officerChildDatalist"></datalist>
+                                    <select id="officerChildSelect" onchange="officerOnChildSelectChange()" 
+                                            style="flex:1; padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13.5px;">
+                                        <option value="">-- รายชื่อเด็กในหมู่ที่ --</option>
+                                    </select>
                                 </div>
+                                <small style="color:#64748b; font-size:11.5px; margin-top:3px; display:block;">
+                                    💡 คลิกเพื่อเลือกจาก Dropdown หรือพิมพ์ชื่อ/HN เพื่อค้นหาได้ทันที
+                                </small>
                             </div>
                         </div>
+
+                        <!-- การ์ดแสดงข้อมูลเด็กที่เลือก -->
                         <div id="officerChildInfo" style="display: none;"></div>
                     </div>
-                    <div class="tracking-card">
-                        <h3><i class="fas fa-syringe"></i> ข้อมูลการติดตามวัคซีน</h3>
+
+                    <div class="tracking-card" style="border-top:4px solid #10b981; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                        <h3><i class="fas fa-syringe" style="color:#10b981;"></i> ข้อมูลการติดตามวัคซีน</h3>
                         <div class="form-row-2">
                             <div class="form-group">
                                 <label>วันที่ติดตาม <span class="required">*</span></label>
-                                <input type="date" id="officerVisitDate" value="${new Date().toISOString().slice(0,10)}">
+                                <input type="date" id="officerVisitDate" value="${new Date().toISOString().slice(0,10)}" style="padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:14px;">
                             </div>
                             <div class="form-group">
                                 <label>วัคซีนที่ให้/ติดตาม <span class="required">*</span></label>
-                                <select id="officerVaccine">${vaccineOptions}</select>
+                                <select id="officerVaccine" style="padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:14px;">${vaccineOptions}</select>
                             </div>
                         </div>
                         <div class="form-group">
                             <label>สถานะการติดตาม <span class="required">*</span></label>
-                            <select id="officerStatus">
+                            <select id="officerStatus" style="padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:14px;">
                                 <option value="">-- เลือกสถานะ --</option>
                                 <option value="ตามนัดปกติ">ตามนัดปกติ (ได้รับวัคซีนแล้ว)</option>
                                 <option value="ขาดนัด">ขาดนัด (ยังไม่ได้รับวัคซีน)</option>
@@ -18246,28 +18329,31 @@ function updateBottomNavActive(page) {
                         </div>
                         <div class="form-group">
                             <label>หมายเหตุ</label>
-                            <textarea id="officerRemarks" rows="3" placeholder="บันทึกข้อมูลเพิ่มเติม เช่น สาเหตุที่ขาดนัด, การนัดหมายครั้งต่อไป ฯลฯ"></textarea>
+                            <textarea id="officerRemarks" rows="3" placeholder="บันทึกข้อมูลเพิ่มเติม เช่น สาเหตุที่ขาดนัด, การนัดหมายครั้งต่อไป ฯลฯ" style="padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13.5px;"></textarea>
                         </div>
                     </div>
-                    <div class="tracking-card">
-                        <h3><i class="fas fa-map-marker-alt"></i> พิกัด GPS (ตำแหน่งที่ติดตาม)</h3>
+
+                    <div class="tracking-card" style="box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                        <h3><i class="fas fa-map-marker-alt" style="color:#f59e0b;"></i> พิกัด GPS (ตำแหน่งที่ติดตาม)</h3>
                         <div class="form-group">
                             <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                                <input type="text" id="officerGps" placeholder="ละติจูด,ลองจิจูด" style="flex:1" readonly>
+                                <input type="text" id="officerGps" placeholder="ละติจูด,ลองจิจูด" style="flex:1; padding:9px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:14px;" readonly>
                                 <button class="btn-gps" onclick="officerGetGPS()"><i class="fas fa-crosshairs"></i> ระบุพิกัดปัจจุบัน</button>
                             </div>
                             <div id="officerGpsDisplay" class="gps-result" style="display: none;"></div>
                             <div class="remark-text">* คลิกปุ่ม "ระบุพิกัดปัจจุบัน" เพื่อบันทึกตำแหน่งที่ติดตาม</div>
                         </div>
                     </div>
-                    <div class="tracking-card">
-                        <h3><i class="fas fa-camera"></i> หลักฐานการติดตาม (รูปภาพ)</h3>
+
+                    <div class="tracking-card" style="box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                        <h3><i class="fas fa-camera" style="color:#8b5cf6;"></i> หลักฐานการติดตาม (รูปภาพ)</h3>
                         <div class="form-group">
                             <input type="file" id="officerFiles" multiple accept="image/*" onchange="officerHandleFiles()">
                             <div id="officerFileList" class="file-list" style="margin-top: 10px;"></div>
                             <div class="remark-text">* สามารถอัปโหลดรูปภาพประกอบการติดตามได้ (ไม่บังคับ)</div>
                         </div>
                     </div>
+
                     <div style="display: flex; gap: 15px; justify-content: center; margin-top: 20px;">
                         <button class="btn-submit" onclick="officerSubmitTracking()"><i class="fas fa-save"></i> บันทึกข้อมูลการติดตาม</button>
                         <button class="btn-reset-form" onclick="officerResetForm()"><i class="fas fa-undo-alt"></i> รีเซ็ตฟอร์ม</button>
@@ -18278,9 +18364,12 @@ function updateBottomNavActive(page) {
             APP.officerSelectedFiles = [];
             APP.officerCurrentChild = null;
 
+            // หากมีหมู่บ้านของผู้ใช้ที่ระบุไว้ในโปรไฟล์ ให้เลือกให้อัตโนมัติและโหลดเด็ก
             if (APP.currentUser.village && APP.currentUser.village !== '-') {
                 const villageSelect = document.getElementById('officerVillage');
-                if (villageSelect) villageSelect.disabled = true;
+                if (villageSelect && villageSelect.value) {
+                    officerOnVillageChange();
+                }
             }
 
         } catch (err) {
@@ -18289,87 +18378,367 @@ function updateBottomNavActive(page) {
         }
     }
 
-    async function officerSearchChild() {
-        const village = document.getElementById('officerVillage').value;
-        const searchText = document.getElementById('officerSearch').value.trim();
+    // ดึงรายชื่อหมู่บ้านเฉพาะสถานพยาบาลที่กำหนด
+    async function getOfficerVillagesForFacility(hcode) {
+        if (!hcode || hcode === 'ทั้งหมด') return [];
+        const unpHc = String(hcode).replace(/^0+/, '');
+        const padHc = String(hcode).padStart(5, '0');
 
-        if (!village) {
-            Swal.fire('แจ้งเตือน', 'กรุณาเลือกหมู่ที่ก่อน', 'warning');
-            return;
-        }
-        if (!searchText) {
-            Swal.fire('แจ้งเตือน', 'กรุณากรอกเลขบัตรหรือชื่อ-สกุลเด็ก', 'warning');
-            return;
-        }
-
-        showLoading('กำลังค้นหาข้อมูลเด็ก...');
+        let villages = [];
         try {
-            const filters = {
-                userRole: APP.currentUser.role,
-                userHcode: APP.currentUser.hcode,
-                userSubdistrict: APP.currentUser.subdistrict,
-                userVillage: APP.currentUser.village
-            };
-            const result = await callGAS('searchChild', [searchText, village, filters]);
-            hideLoading();
+            // 1. ดึงจากตาราง villages ของสถานพยาบาลนี้
+            const { data, error } = await supabaseClient
+                .from('villages')
+                .select('*')
+                .or('hcode.eq.' + hcode + ',hcode.eq.' + unpHc + ',hcode.eq.' + padHc)
+                .order('village_no', { ascending: true });
 
-            if (result.success && result.child) {
-                APP.officerCurrentChild = result.child;
-                const child = result.child;
-                const infoDiv = document.getElementById('officerChildInfo');
-
-                infoDiv.innerHTML = `
-                    <div class="child-info-box" style="margin-top: 15px;">
-                        <h4><i class="fas fa-child"></i> ข้อมูลเด็ก</h4>
-                        <div class="info-grid">
-                            <p><strong>ชื่อ-สกุล:</strong> ${esc(child.fullname)}</p>
-                            <p><strong>HN:</strong> ${esc(child.hn)}</p>
-                            <p><strong>วันเกิด:</strong> ${formatDate(child.birthDate)}</p>
-                            <p><strong>อายุ:</strong> ${esc(child.age)}</p>
-                            <p><strong>บ้านเลขที่:</strong> ${esc(child.houseNumber)}</p>
-                            <p><strong>หมู่ที่:</strong> ${esc(child.village)}</p>
-                            <p><strong>โทรศัพท์:</strong> ${child.phone && child.phone !== '-' ? '<a href="tel:' + esc(child.phone.replace(/[^0-9+]/g, '')) + '" class="btn-call-pill" title="กดเพื่อโทรออก"><i class="fas fa-phone-alt"></i> โทร ' + esc(child.phone) + '</a>' : '-'}</p>
-                            <p><strong>บิดา:</strong> ${esc(child.fatherName || '-')}</p>
-                            <p><strong>มารดา:</strong> ${esc(child.motherName || '-')}</p>
-                            <p><strong>อสม.ประจำ:</strong> ${esc(child.asm || '-')}</p>
-                            ${child.gps && child.gps.includes(',') ? '<p style="grid-column: 1/-1;"><strong>แผนที่นำทาง:</strong> <a href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(child.gps.trim()) + '" target="_blank" class="btn-nav-pill" title="เปิด Google Maps นำทาง"><i class="fas fa-directions"></i> นำทาง Google Maps ไปยังบ้านเด็ก</a></p>' : ''}
-                        </div>
-                    </div>
-                `;
-                infoDiv.style.display = 'block';
-
-                if (child.gps && child.gps.includes(',')) {
-                    document.getElementById('officerGps').value = child.gps;
-                    const dispDiv = document.getElementById('officerGpsDisplay');
-                    if (dispDiv) {
-                        dispDiv.innerHTML =
-                            '<i class="fas fa-map-marker-alt"></i> พิกัดจากข้อมูลเด็ก: ' + child.gps +
-                            '<br><small style="color:#888;">* หากต้องการอัปเดตพิกัดใหม่ ให้คลิกปุ่ม "ระบุพิกัดปัจจุบัน"</small>';
-                        dispDiv.style.display = 'block';
+            if (!error && data && data.length > 0) {
+                const seen = new Set();
+                data.forEach(v => {
+                    const no = String(v.village_no || v.no || '').trim();
+                    const name = String(v.village_name || v.name || '').trim();
+                    const displayName = name ? (name.includes('หมู่') ? name : ('หมู่ที่ ' + no + ' ' + name).trim()) : ('หมู่ที่ ' + no);
+                    if (displayName && !seen.has(displayName)) {
+                        seen.add(displayName);
+                        villages.push({ no: no, name: displayName, rawName: name });
                     }
-                } else {
-                    document.getElementById('officerGps').value = '';
-                    const dispDiv2 = document.getElementById('officerGpsDisplay');
-                    if (dispDiv2) dispDiv2.style.display = 'none';
-                }
-
-            } else {
-                APP.officerCurrentChild = null;
-                document.getElementById('officerChildInfo').style.display = 'none';
-                document.getElementById('officerGps').value = '';
-                document.getElementById('officerGpsDisplay').style.display = 'none';
-                Swal.fire('ไม่พบข้อมูล', result.message || 'ไม่พบข้อมูลเด็กในหมู่บ้านนี้', 'info');
+                });
             }
-        } catch (err) {
-            hideLoading();
-            Swal.fire('ผิดพลาด', err.message, 'error');
+        } catch (e) {
+            console.warn('getOfficerVillagesForFacility table villages error:', e);
+        }
+
+        // 2. หากในตาราง villages ไม่มี ให้รวบรวมจากตาราง data ของสถานพยาบาลนี้
+        if (villages.length === 0) {
+            try {
+                const { data: cData, error: cErr } = await supabaseClient
+                    .from('data')
+                    .select('moo, villname, village_no, village_name, hcode')
+                    .or('hcode.eq.' + hcode + ',hcode.eq.' + unpHc + ',hcode.eq.' + padHc);
+
+                if (!cErr && cData && cData.length > 0) {
+                    const vMap = new Map();
+                    cData.forEach(r => {
+                        const m = String(r.moo || r.village_no || '').trim();
+                        const vName = String(r.villname || r.village_name || '').trim();
+                        if (m && m !== '-' && m !== '0') {
+                            const displayName = (vName && vName !== '-' && vName !== '0') ? ('หมู่ที่ ' + m + ' ' + vName) : ('หมู่ที่ ' + m);
+                            if (!vMap.has(m)) {
+                                vMap.set(m, displayName);
+                            }
+                        }
+                    });
+                    const sortedKeys = Array.from(vMap.keys()).sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+                    villages = sortedKeys.map(k => ({
+                        no: k,
+                        name: vMap.get(k),
+                        rawName: vMap.get(k)
+                    }));
+                }
+            } catch (e2) {
+                console.warn('fallback villages from data error:', e2);
+            }
+        }
+
+        return villages;
+    }
+
+    // เมื่อ Admin เปลี่ยนสถานพยาบาลในแบบฟอร์ม
+    async function officerOnFacilityChange() {
+        const facEl = document.getElementById('officerFacility');
+        const targetHcode = facEl ? facEl.value : '';
+        const villageSelect = document.getElementById('officerVillage');
+
+        officerClearChildInfo();
+        if (villageSelect) {
+            villageSelect.innerHTML = '<option value="">⏳ กำลังโหลดหมู่บ้าน...</option>';
+        }
+
+        const villages = await getOfficerVillagesForFacility(targetHcode);
+        let villageOptions = '<option value="">-- เลือกหมู่ที่ --</option>';
+        villages.forEach(v => {
+            villageOptions += '<option value="' + esc(v.name) + '">' + esc(v.name) + '</option>';
+        });
+
+        if (villageSelect) {
+            villageSelect.innerHTML = villageOptions;
+        }
+
+        const childSelect = document.getElementById('officerChildSelect');
+        if (childSelect) childSelect.innerHTML = '<option value="">-- กรุณาเลือกหมู่ที่ก่อน --</option>';
+        const childDatalist = document.getElementById('officerChildDatalist');
+        if (childDatalist) childDatalist.innerHTML = '';
+        const childInput = document.getElementById('officerChildInput');
+        if (childInput) childInput.value = '';
+        const childCountBadge = document.getElementById('childCountBadge');
+        if (childCountBadge) childCountBadge.textContent = '';
+        window.OFFICER_VILLAGE_CHILDREN = [];
+    }
+
+    // เมื่อเลือกหมู่ที่ ให้โหลดเด็กในหมู่บ้านนั้นมาใส่ Dropdown และ Datalist
+    async function officerOnVillageChange() {
+        const villageSel = document.getElementById('officerVillage');
+        const selectedVillage = villageSel ? villageSel.value : '';
+        const childSelect = document.getElementById('officerChildSelect');
+        const childDatalist = document.getElementById('officerChildDatalist');
+        const childInput = document.getElementById('officerChildInput');
+        const childCountBadge = document.getElementById('childCountBadge');
+
+        officerClearChildInfo();
+
+        if (!selectedVillage) {
+            if (childSelect) childSelect.innerHTML = '<option value="">-- กรุณาเลือกหมู่ที่ก่อน --</option>';
+            if (childDatalist) childDatalist.innerHTML = '';
+            if (childInput) childInput.value = '';
+            if (childCountBadge) childCountBadge.textContent = '';
+            window.OFFICER_VILLAGE_CHILDREN = [];
+            return;
+        }
+
+        if (childSelect) childSelect.innerHTML = '<option value="">⏳ กำลังโหลดรายชื่อเด็ก...</option>';
+        if (childCountBadge) childCountBadge.textContent = '(กำลังโหลด...)';
+
+        try {
+            const facEl = document.getElementById('officerFacility');
+            const targetHcode = facEl ? facEl.value : (APP.currentUser && APP.currentUser.hcode ? APP.currentUser.hcode : '');
+
+            // ดึงเด็กในหมู่บ้านนี้
+            const res = await callGAS('getChildren', [{
+                userRole: APP.currentUser ? APP.currentUser.role : '',
+                userHcode: targetHcode,
+                hcode: targetHcode,
+                village: selectedVillage
+            }]);
+
+            let children = (res && res.success && res.children) ? res.children : [];
+
+            // ถ้าผลลัพธ์ว่าง ลองกรองด้วยชื่อหมู่บ้านหรือเลขหมู่จากข้อมูลสถานพยาบาล
+            if (children.length === 0) {
+                const allRes = await callGAS('getChildren', [{
+                    userRole: APP.currentUser ? APP.currentUser.role : '',
+                    userHcode: targetHcode,
+                    hcode: targetHcode
+                }]);
+                if (allRes && allRes.success && allRes.children) {
+                    const vNum = selectedVillage.replace(/\D/g, '');
+                    children = allRes.children.filter(c => {
+                        const cMoo = String(c.village || '').trim();
+                        const cVillName = String(c.villageName || '').trim();
+                        if (cMoo === selectedVillage || cVillName === selectedVillage) return true;
+                        if (vNum && cMoo.replace(/\D/g, '') === vNum) return true;
+                        if (selectedVillage.includes(cVillName) && cVillName.length > 2) return true;
+                        return false;
+                    });
+                }
+            }
+
+            // จัดเรียงตามชื่อเด็ก
+            children.sort((a, b) => String(a.fullname || '').localeCompare(String(b.fullname || ''), 'th'));
+            window.OFFICER_VILLAGE_CHILDREN = children;
+
+            if (childCountBadge) {
+                childCountBadge.textContent = '(พบ ' + children.length + ' คน)';
+            }
+
+            if (children.length === 0) {
+                if (childSelect) childSelect.innerHTML = '<option value="">-- ไม่พบข้อมูลเด็กในหมู่นี้ --</option>';
+                if (childDatalist) childDatalist.innerHTML = '';
+                if (childInput) {
+                    childInput.placeholder = 'ไม่พบเด็กในหมู่นี้';
+                    childInput.value = '';
+                }
+                return;
+            }
+
+            // สร้าง Options สำหรับ Select Dropdown และ Datalist สำหรับพิมพ์ค้นหา
+            let opts = '<option value="">-- เลือกชื่อเด็ก (' + children.length + ' คน) --</option>';
+            let datalistHtml = '';
+
+            children.forEach((c, idx) => {
+                const cid = c.cid || c.id || '';
+                const hn = c.hn || '';
+                const house = (c.houseNumber && c.houseNumber !== '-') ? ('บ้านเลขที่ ' + c.houseNumber) : '';
+                const label = (idx + 1) + '. ' + c.fullname + ' (HN: ' + (hn || '-') + (house ? ', ' + house : '') + ')';
+                const searchVal = c.fullname + ' (HN: ' + (hn || '-') + (cid ? ', CID: ' + cid : '') + ')';
+
+                opts += '<option value="' + esc(cid || hn) + '">' + esc(label) + '</option>';
+                datalistHtml += '<option value="' + esc(searchVal) + '" data-cid="' + esc(cid || hn) + '">' + esc(label) + '</option>';
+            });
+
+            if (childSelect) childSelect.innerHTML = opts;
+            if (childDatalist) childDatalist.innerHTML = datalistHtml;
+            if (childInput) {
+                childInput.placeholder = 'คลิกเลือกชื่อเด็ก หรือพิมพ์ค้นหา...';
+                childInput.value = '';
+            }
+
+        } catch (e) {
+            console.error('officerOnVillageChange error:', e);
+            if (childSelect) childSelect.innerHTML = '<option value="">เกิดข้อผิดพลาดในการโหลดเด็ก</option>';
+        }
+    }
+
+    // เมื่อเลือกจาก Select Dropdown
+    function officerOnChildSelectChange() {
+        const sel = document.getElementById('officerChildSelect');
+        const cidOrHn = sel ? sel.value : '';
+        if (!cidOrHn) {
+            officerClearChildInfo();
+            return;
+        }
+        const child = (window.OFFICER_VILLAGE_CHILDREN || []).find(c => (c.cid === cidOrHn || c.id === cidOrHn || c.hn === cidOrHn));
+        if (child) {
+            selectAndDisplayOfficerChild(child);
+            const inp = document.getElementById('officerChildInput');
+            if (inp) inp.value = child.fullname + ' (HN: ' + (child.hn || '-') + ')';
+        }
+    }
+
+    // เมื่อพิมพ์ค้นหาหรือเลือกจาก Datalist Input
+    function officerOnChildInputChange() {
+        const inp = document.getElementById('officerChildInput');
+        const val = inp ? inp.value.trim().toLowerCase() : '';
+        if (!val) {
+            officerClearChildInfo();
+            return;
+        }
+        const cleanDigits = val.replace(/\D/g, '');
+        const child = (window.OFFICER_VILLAGE_CHILDREN || []).find(c => {
+            const fn = String(c.fullname || '').toLowerCase();
+            const cid = String(c.cid || c.id || '').replace(/\D/g, '');
+            const hn = String(c.hn || '').toLowerCase();
+            if (fn.includes(val) || val.includes(fn)) return true;
+            if (cleanDigits && cid && cid.includes(cleanDigits)) return true;
+            if (hn && val.includes(hn)) return true;
+            return false;
+        });
+
+        if (child) {
+            selectAndDisplayOfficerChild(child);
+            const sel = document.getElementById('officerChildSelect');
+            if (sel) sel.value = child.cid || child.hn;
+        }
+    }
+
+    // ฟังก์ชันแสดงข้อมูลเด็กที่เลือก
+    function selectAndDisplayOfficerChild(child) {
+        APP.officerCurrentChild = child;
+        const infoDiv = document.getElementById('officerChildInfo');
+        if (!infoDiv) return;
+
+        infoDiv.innerHTML = `
+            <div class="child-info-box" style="margin-top: 15px; background:#f0fdf4; border:1.5px solid #86efac; border-radius:10px; padding:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #bbf7d0; padding-bottom:8px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <i class="fas fa-check-circle" style="color:#16a34a; font-size:18px;"></i>
+                        <h4 style="margin:0; font-size:16px; font-weight:700; color:#14532d;">ข้อมูลเด็กที่เลือก</h4>
+                    </div>
+                    <span style="font-size:12px; background:#dcfce7; color:#15803d; padding:4px 12px; border-radius:12px; font-weight:600; border:1px solid #86efac;">
+                        พร้อมบันทึกติดตาม
+                    </span>
+                </div>
+                <div class="info-grid">
+                    <p><strong>ชื่อ-สกุล:</strong> <span style="font-size:15px; font-weight:700; color:#0f172a;">${esc(child.fullname)}</span></p>
+                    <p><strong>HN:</strong> ${esc(child.hn || '-')}</p>
+                    <p><strong>เลขบัตร (CID):</strong> ${esc(child.cid || child.id || '-')}</p>
+                    <p><strong>วันเกิด:</strong> ${formatDate(child.birthDate)}</p>
+                    <p><strong>อายุ:</strong> ${esc(child.age)}</p>
+                    <p><strong>บ้านเลขที่:</strong> ${esc(child.houseNumber || '-')}</p>
+                    <p><strong>หมู่ที่:</strong> ${esc(child.village || '-')}</p>
+                    <p><strong>สถานะวัคซีน:</strong> <span style="font-weight:600; color:${child.status === 'ครบตามเกณฑ์' ? '#15803d' : '#dc2626'};">${esc(child.status || '-')}</span></p>
+                    <p><strong>โทรศัพท์:</strong> ${child.phone && child.phone !== '-' ? '<a href="tel:' + esc(child.phone.replace(/[^0-9+]/g, '')) + '" class="btn-call-pill" title="กดเพื่อโทรออก"><i class="fas fa-phone-alt"></i> โทร ' + esc(child.phone) + '</a>' : '-'}</p>
+                    <p><strong>บิดา:</strong> ${esc(child.fatherName || '-')}</p>
+                    <p><strong>มารดา:</strong> ${esc(child.motherName || '-')}</p>
+                    <p><strong>อสม.ประจำ:</strong> ${esc(child.asm || '-')}</p>
+                    ${child.gps && child.gps.includes(',') ? '<p style="grid-column: 1/-1;"><strong>แผนที่นำทาง:</strong> <a href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(child.gps.trim()) + '" target="_blank" class="btn-nav-pill" title="เปิด Google Maps นำทาง"><i class="fas fa-directions"></i> นำทาง Google Maps ไปยังบ้านเด็ก</a></p>' : ''}
+                </div>
+            </div>
+        `;
+        infoDiv.style.display = 'block';
+
+        if (child.gps && child.gps.includes(',')) {
+            document.getElementById('officerGps').value = child.gps;
+            const dispDiv = document.getElementById('officerGpsDisplay');
+            if (dispDiv) {
+                dispDiv.innerHTML =
+                    '<i class="fas fa-map-marker-alt" style="color:#dc2626;"></i> พิกัดจากข้อมูลเด็ก: ' + child.gps +
+                    '<br><small style="color:#64748b;">* หากต้องการอัปเดตพิกัดใหม่ ให้คลิกปุ่ม "ระบุพิกัดปัจจุบัน"</small>';
+                dispDiv.style.display = 'block';
+            }
+        } else {
+            document.getElementById('officerGps').value = '';
+            const dispDiv2 = document.getElementById('officerGpsDisplay');
+            if (dispDiv2) dispDiv2.style.display = 'none';
         }
     }
 
     function officerClearChildInfo() {
         APP.officerCurrentChild = null;
-        document.getElementById('officerChildInfo').style.display = 'none';
-        document.getElementById('officerSearch').value = '';
+        const infoDiv = document.getElementById('officerChildInfo');
+        if (infoDiv) infoDiv.style.display = 'none';
+        const gpsEl = document.getElementById('officerGps');
+        if (gpsEl) gpsEl.value = '';
+        const dispDiv = document.getElementById('officerGpsDisplay');
+        if (dispDiv) dispDiv.style.display = 'none';
+    }
+
+    // ฟังก์ชันค้นหาเด็กแบบด่วน (เผื่อผู้ใช้ต้องการพิมพ์ค้นหาด้วยตนเอง)
+    async function officerSearchChild() {
+        const village = document.getElementById('officerVillage') ? document.getElementById('officerVillage').value : '';
+        const inp = document.getElementById('officerChildInput');
+        const searchText = inp ? inp.value.trim() : '';
+
+        if (!searchText) {
+            Swal.fire('แจ้งเตือน', 'กรุณากรอกเลขบัตรหรือชื่อ-สกุลเด็กเพื่อค้นหา', 'warning');
+            return;
+        }
+
+        // ลองค้นหาจากรายการเด็กในหมู่ที่โหลดไว้ก่อน
+        if (window.OFFICER_VILLAGE_CHILDREN && window.OFFICER_VILLAGE_CHILDREN.length > 0) {
+            const cleanDigits = searchText.replace(/\D/g, '');
+            const match = window.OFFICER_VILLAGE_CHILDREN.find(c => {
+                const fn = String(c.fullname || '').toLowerCase();
+                const cid = String(c.cid || c.id || '').replace(/\D/g, '');
+                const hn = String(c.hn || '').toLowerCase();
+                if (fn.includes(searchText.toLowerCase())) return true;
+                if (cleanDigits && cid && cid.includes(cleanDigits)) return true;
+                if (hn && hn.includes(searchText.toLowerCase())) return true;
+                return false;
+            });
+            if (match) {
+                selectAndDisplayOfficerChild(match);
+                const sel = document.getElementById('officerChildSelect');
+                if (sel) sel.value = match.cid || match.hn;
+                return;
+            }
+        }
+
+        showLoading('กำลังค้นหาข้อมูลเด็ก...');
+        try {
+            const facEl = document.getElementById('officerFacility');
+            const targetHcode = facEl ? facEl.value : (APP.currentUser && APP.currentUser.hcode ? APP.currentUser.hcode : '');
+            const filters = {
+                userRole: APP.currentUser ? APP.currentUser.role : '',
+                userHcode: targetHcode,
+                hcode: targetHcode,
+                village: village
+            };
+            const result = await callGAS('searchChild', [searchText, village, filters]);
+            hideLoading();
+
+            const foundChild = result.child || (result.children && result.children[0]);
+            if (result.success && foundChild) {
+                selectAndDisplayOfficerChild(foundChild);
+                if (inp) inp.value = foundChild.fullname + ' (HN: ' + (foundChild.hn || '-') + ')';
+            } else {
+                officerClearChildInfo();
+                Swal.fire('ไม่พบข้อมูล', result.message || 'ไม่พบข้อมูลเด็กที่ตรงกับเงื่อนไขค้นหา', 'info');
+            }
+        } catch (err) {
+            hideLoading();
+            Swal.fire('ผิดพลาด', err.message, 'error');
+        }
     }
 
     function officerGetGPS() {
@@ -18499,7 +18868,10 @@ function updateBottomNavActive(page) {
         APP.officerCurrentChild = null;
         APP.officerSelectedFiles = [];
 
-        document.getElementById('officerSearch').value = '';
+        if (document.getElementById('officerSearch')) document.getElementById('officerSearch').value = '';
+        if (document.getElementById('officerChildInput')) document.getElementById('officerChildInput').value = '';
+        if (document.getElementById('officerChildSelect')) document.getElementById('officerChildSelect').value = '';
+        if (document.getElementById('childCountBadge')) document.getElementById('childCountBadge').textContent = '';
         document.getElementById('officerChildInfo').style.display = 'none';
         document.getElementById('officerVisitDate').value = new Date().toISOString().slice(0, 10);
         document.getElementById('officerVaccine').value = '';
