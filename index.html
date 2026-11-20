@@ -5035,6 +5035,7 @@
                 <div id="outOfAreaChildrenPage" class="page"></div>
                 <div id="pcvTargetPage" class="page"></div>
                 <div id="dtpReportPage" class="page"></div>
+                <div id="studentVaccinePage" class="page"></div>
                 <div id="vaccineStockPage" class="page"></div>
             </div>
         </div>
@@ -6451,7 +6452,7 @@
             try {
                 const { data: stData } = await supabaseClient
                     .from('data_student')
-                    .select('"CID", "HN", fullname, school')
+                    .select('CID, HN, fullname, school')
                     .not('school', 'is', null);
                 if (stData && stData.length > 0) {
                     stData.forEach(st => {
@@ -6598,50 +6599,6 @@
                 students = await fetchAllFromTable('data_student', '*', filterBuilder);
             } catch (eSt) {
                 console.warn('fetchAllFromTable data_student error:', eSt);
-            }
-
-            // ถ้าใน data_student ยังไม่มีข้อมูล ให้ดึงสำรองจากตาราง data ที่มี school
-            if (!students || students.length === 0) {
-                try {
-                    const dataRows = await fetchAllFromTable('data', '*', (q) => {
-                        q = q.not('school', 'is', null).neq('school', '').neq('school', '-');
-                        return filterBuilder(q);
-                    });
-                    if (dataRows && dataRows.length > 0) {
-                        students = dataRows.map(r => ({
-                            hcode: r.hcode,
-                            CID: r.CID,
-                            HN: r.HN,
-                            fullname: r.fullname,
-                            DOB: r.DOB,
-                            school: r.school,
-                            class: r.class || '-',
-                            typearea: r.type || 1,
-                            BCG: r.BCG,
-                            HBV1: r.HBV1,
-                            'DTP+HB+Hib1': r['DTP+HB+Hib1'] || r['DTP-HB-Hib1'],
-                            Rota1: r.Rota1,
-                            IPV1: r.IPV1,
-                            'DTP+HB+Hib2': r['DTP+HB+Hib2'] || r['DTP-HB-Hib2'],
-                            Rota2: r.Rota2,
-                            IPV2: r.IPV2,
-                            'DTP+HB+Hib3': r['DTP+HB+Hib3'] || r['DTP-HB-Hib3'],
-                            OPV3: r.OPV3,
-                            Rota3: r.Rota3,
-                            MMR1: r.MMR1,
-                            LJE1: r.LJE1,
-                            DTP4: r.DTP4,
-                            OPV4: r.OPV4,
-                            MMR2: r.MMR2,
-                            LJE2: r.LJE2,
-                            DTP5: r.DTP5,
-                            OPV5: r.OPV5,
-                            PCV1: r.PCV1,
-                            PCV2: r.PCV2,
-                            PCV3: r.PCV3
-                        }));
-                    }
-                } catch(eFallback) {}
             }
 
             // ดึงกลุ่มปฏิเสธวัคซีน
@@ -7484,7 +7441,7 @@
             try {
                 const { data: studentSchools } = await supabaseClient
                     .from('data_student')
-                    .select('"CID", "HN", fullname, school, class')
+                    .select('CID, HN, fullname, school, class')
                     .not('school', 'is', null);
                 if (studentSchools && studentSchools.length > 0) {
                     studentSchools.forEach(st => {
@@ -12184,7 +12141,8 @@ async function warmUpBackend() {
                 { id: 'children', icon: 'fas fa-child', label: 'รายชื่อเด็กทั้งหมด' },
                 { id: 'missing', icon: 'fas fa-user-times', label: 'เด็กขาดนัด' },
                 { id: 'appointments', icon: 'fas fa-calendar-alt', label: 'รายชื่อนัดวัคซีน' },
-                { id: 'dtpReport', icon: 'fas fa-shield-virus', label: 'วัคซีนคอตีบ (DTP)', badge: 'ระบาด' },
+                { id: 'dtpReport', icon: 'fas fa-shield-virus', label: 'วัคซีนคอตีบไอกรน (DTP)', badge: 'ระบาด' },
+                { id: 'studentVaccine', icon: 'fas fa-graduation-cap', label: 'ข้อมูลวัคซีนนักเรียน' },
                 { id: 'pcvTarget', icon: 'fas fa-syringe', label: 'กลุ่มเป้าหมายวัคซีน PCV' },
                 { id: 'vaccineStock', icon: 'fas fa-boxes', label: 'คลังวัคชีน' },
                 { id: 'outOfAreaChildren', icon: 'fas fa-street-view', label: 'เด็กนอกเขต (Type 4)' },
@@ -12201,7 +12159,8 @@ async function warmUpBackend() {
                 { id: 'children', icon: 'fas fa-child', label: 'รายชื่อเด็ก' },
                 { id: 'missing', icon: 'fas fa-user-times', label: 'เด็กขาดนัด' },
                 { id: 'appointments', icon: 'fas fa-calendar-alt', label: 'รายชื่อนัดวัคซีน' },
-                { id: 'dtpReport', icon: 'fas fa-shield-virus', label: 'วัคซีนคอตีบ (DTP)', badge: 'ระบาด' },
+                { id: 'dtpReport', icon: 'fas fa-shield-virus', label: 'วัคซีนคอตีบไอกรน (DTP)', badge: 'ระบาด' },
+                { id: 'studentVaccine', icon: 'fas fa-graduation-cap', label: 'ข้อมูลวัคซีนนักเรียน' },
                 { id: 'pcvTarget', icon: 'fas fa-syringe', label: 'กลุ่มเป้าหมายวัคซีน PCV' },
                 { id: 'vaccineStock', icon: 'fas fa-boxes', label: 'คลังวัคชีน' },
                 { id: 'outOfAreaChildren', icon: 'fas fa-street-view', label: 'เด็กนอกเขต (Type 4)' },
@@ -12215,7 +12174,8 @@ async function warmUpBackend() {
             items = [
                 { id: 'dashboard', icon: 'fas fa-home', label: 'หน้าแรก' },
                 { id: 'missing', icon: 'fas fa-user-times', label: 'เด็กขาดนัด' },
-                { id: 'dtpReport', icon: 'fas fa-shield-virus', label: 'วัคซีนคอตีบ (DTP)', badge: 'ระบาด' },
+                { id: 'dtpReport', icon: 'fas fa-shield-virus', label: 'วัคซีนคอตีบไอกรน (DTP)', badge: 'ระบาด' },
+                { id: 'studentVaccine', icon: 'fas fa-graduation-cap', label: 'ข้อมูลวัคซีนนักเรียน' },
                 { id: 'pcvTarget', icon: 'fas fa-syringe', label: 'กลุ่มเป้าหมายวัคซีน PCV' },
                 { id: 'vaccineStock', icon: 'fas fa-boxes', label: 'คลังวัคชีน' },
                 { id: 'trackingForm', icon: 'fas fa-plus-circle', label: 'รายงานการติดตาม' },
@@ -12377,6 +12337,7 @@ const PAGE_TITLES = {
     duplicateReport: 'ตรวจสอบเด็กคนเดียว อยู่หลายสถานพยาบาล (เลขบัตรประชาชนซ้ำ)',
     outOfAreaChildren: 'ค้นหารายชื่อเด็กนอกเขต (Type 4)',
     dtpReport: 'รายงานตรวจสอบและติดตามวัคซีนคอตีบไอกรน (DTP Outbreak Response)',
+    studentVaccine: 'ข้อมูลและประวัติวัคซีนนักเรียนในสถานศึกษา (โรงเรียน/ศพด.)',
     pcvTarget: 'รายงานกลุ่มเป้าหมายวัคซีน PCV (เด็กเกิดตั้งแต่ 1 ต.ค. 2568)',
     vaccineStock: 'คลังวัคชีนและเวชภัณฑ์ (Stock)',
 };
@@ -12428,6 +12389,10 @@ function navigateTo(page) {
         case 'dtpReport':
             document.getElementById('dtpReportPage').classList.add('active');
             loadDtpReportPage();
+            break;
+        case 'studentVaccine':
+            document.getElementById('studentVaccinePage').classList.add('active');
+            loadStudentVaccinePage();
             break;
         case 'pcvTarget':
             document.getElementById('pcvTargetPage').classList.add('active');
