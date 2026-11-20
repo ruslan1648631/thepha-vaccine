@@ -7540,12 +7540,11 @@
                 console.warn('getDtpOutbreakReport: could not fetch schools from VCC_tracking', eSch);
             }
 
-            // ดึงข้อมูลโรงเรียนจาก data_student เพื่อเติมให้เด็กที่มีข้อมูลโรงเรียนว่างอยู่
+            // ดึงข้อมูลโรงเรียนจาก data_student ทั้งหมด (ใช้ fetchAllFromTable เพื่อไม่ให้ติด limit 1,000 แถว)
             try {
-                const { data: studentSchools } = await supabaseClient
-                    .from('data_student')
-                    .select('CID, HN, fullname, school, class')
-                    .not('school', 'is', null);
+                const studentSchools = await fetchAllFromTable('data_student', 'CID, HN, fullname, school, class', (q) => {
+                    return q.not('school', 'is', null).neq('school', '').neq('school', '-');
+                });
                 if (studentSchools && studentSchools.length > 0) {
                     studentSchools.forEach(st => {
                         const rawCid = String(st.CID || '').trim();
@@ -7556,12 +7555,12 @@
                         const normN = name.replace(/\s+/g, '');
                         const sch = String(st.school || '').trim();
                         if (sch && sch !== '-' && sch !== '0') {
-                            if (cleanC && !schoolMap.has(cleanC)) schoolMap.set(cleanC, sch);
-                            if (unpC && !schoolMap.has(unpC)) schoolMap.set(unpC, sch);
-                            if (rawCid && !schoolMap.has(rawCid)) schoolMap.set(rawCid, sch);
-                            if (hn && !schoolMap.has(hn)) schoolMap.set(hn, sch);
-                            if (name && !schoolMap.has(name)) schoolMap.set(name, sch);
-                            if (normN && !schoolMap.has(normN)) schoolMap.set(normN, sch);
+                            if (cleanC) schoolMap.set(cleanC, sch);
+                            if (unpC) schoolMap.set(unpC, sch);
+                            if (rawCid) schoolMap.set(rawCid, sch);
+                            if (hn && hn !== '-' && hn !== '0') schoolMap.set('HN_' + hn, sch);
+                            if (name && name !== '-' && name !== '0') schoolMap.set(name, sch);
+                            if (normN && normN !== '-' && normN !== '0') schoolMap.set(normN, sch);
                         }
                     });
                 }
@@ -25864,22 +25863,13 @@ function renderDtpTargetTable() {
                     ${c.phone && c.phone !== '-' ? `<div style="font-size:11px; color:#0284c7;"><i class="fas fa-phone-alt" style="font-size:9px;"></i> ${esc(c.phone)}</div>` : ''}
                 </td>
                 <td style="padding:10px 12px; font-size:12px; vertical-align:middle; white-space:nowrap;">
-                    ${c.school && c.school !== '-' && c.school !== 'ไม่ระบุ' ? `
-                        <div style="display:inline-flex; align-items:center; gap:6px; background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:5px 10px; border-radius:8px; font-weight:600; font-size:12px;">
-                            <i class="fas fa-school" style="color:#2563eb;"></i>
+                    ${(c.school && c.school !== '-' && c.school !== 'ไม่ระบุ') ? `
+                        <div style="display:inline-flex; align-items:center; gap:6px; background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:4px 9px; border-radius:6px; font-weight:600; font-size:12px;">
+                            <i class="fas fa-school" style="color:#2563eb; font-size:11px;"></i>
                             <span>${esc(c.school)}</span>
-                            <button type="button" onclick="openEditDtpSchoolModal('${esc(c.cid || c.id)}', '${esc(c.fullname)}', '${esc(c.school)}')" 
-                                    style="background:transparent; border:none; cursor:pointer; color:#2563eb; padding:0 2px; margin-left:4px;" 
-                                    title="แก้ไขโรงเรียน">
-                                <i class="fas fa-pen" style="font-size:10px;"></i>
-                            </button>
                         </div>
                     ` : `
-                        <button type="button" onclick="openEditDtpSchoolModal('${esc(c.cid || c.id)}', '${esc(c.fullname)}', '')" 
-                                style="background:#fff; color:#2563eb; border:1px dashed #3b82f6; border-radius:8px; padding:5px 12px; font-size:12px; font-family:Kanit; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(37,99,235,0.06); transition:all 0.15s;"
-                                onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='#fff'">
-                            <i class="fas fa-plus-circle" style="color:#2563eb;"></i> ระบุโรงเรียน
-                        </button>
+                        <span style="color:#cbd5e1; font-size:13px;">-</span>
                     `}
                 </td>
                 <td style="padding:8px 8px; text-align:center; background:#fef2f2;">
