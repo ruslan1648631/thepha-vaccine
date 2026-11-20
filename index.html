@@ -27523,22 +27523,19 @@ window.exportDtpBySchoolExcel = async function() {
         showLoading('กำลังโหลดข้อมูลวัคซีนนักเรียน...');
         try {
             const fRes = await callGAS('getFacilityMap', []);
-            const facilityMap = (fRes && fRes.success) ? fRes.data : (APP.facilityMap || {});
-
-            const isAdminAmpur = isAdminAmpurUser();
-            const isSpecialOfficer = isSpecialOfficerUser();
-            const canSelectAll = isAdminAmpur || isSpecialOfficer;
+            const facilityMap = (fRes && fRes.success) ? (fRes.map || fRes.data || {}) : (APP.facilityMap || {});
+            if (typeof updateFacilityMap === 'function') {
+                APP.facilityMap = updateFacilityMap(facilityMap);
+            }
 
             let facilityOptions = '';
-            if (canSelectAll) {
-                facilityOptions = '<option value="ทั้งหมด">-- ทุกสถานพยาบาล --</option>';
-                Object.keys(facilityMap).sort().forEach(hc => {
-                    facilityOptions += '<option value="' + esc(hc) + '">' + esc(hc) + ' : ' + esc(facilityMap[hc]) + '</option>';
-                });
+            if (typeof buildFacilityDropdownOptions === 'function') {
+                facilityOptions = buildFacilityDropdownOptions('ทั้งหมด', '-- ทุกสถานพยาบาล --');
             } else {
-                const uHc = APP.currentUser ? APP.currentUser.hcode : '';
-                const uName = facilityMap[uHc] || (APP.currentUser ? APP.currentUser.hospital : '') || uHc;
-                facilityOptions = '<option value="' + esc(uHc) + '" selected>' + esc(uHc) + ' : ' + esc(uName) + '</option>';
+                facilityOptions = '<option value="ทั้งหมด">-- ทุกสถานพยาบาล --</option>';
+                Object.keys(facilityMap || {}).sort().forEach(hc => {
+                    facilityOptions += '<option value="' + esc(hc) + '">' + esc(hc) + ' : ' + esc(facilityMap[hc] || hc) + '</option>';
+                });
             }
 
             page.innerHTML = `
