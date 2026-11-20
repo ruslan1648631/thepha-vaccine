@@ -6565,7 +6565,7 @@
             return { success: true, children };
         }
 
-                // 16.8 รายงานข้อมูลวัคซีนนักเรียนในโรงเรียน/ศพด. (Get Student Vaccine Report)
+        // 16.8 รายงานข้อมูลวัคซีนนักเรียนในโรงเรียน/ศพด. (Get Student Vaccine Report - ผสาน data + data_student)
         if (fnName === 'getStudentVaccineReport') {
             const filters = args[0] || {};
             const userRoleNorm = String(filters.userRole || '').toLowerCase().trim();
@@ -6594,11 +6594,101 @@
                 return q;
             };
 
-            let students = [];
+            const V_KEYS = [
+                'BCG', 'HBV1', 'DTP+HB+Hib1', 'Rota1', 'IPV1',
+                'DTP+HB+Hib2', 'Rota2', 'IPV2', 'DTP+HB+Hib3', 'OPV3', 'Rota3',
+                'MMR1', 'LJE1', 'DTP4', 'OPV4', 'MMR2', 'LJE2',
+                'DTP5', 'OPV5', 'PCV1', 'PCV2', 'PCV3'
+            ];
+
+            let studentsFromDb = [];
+            let isLoadedFromView = false;
+
+            // 1. ลองดึงจาก VIEW v_student_vaccine_complete ใน Supabase ก่อน (กรณีสร้าง VIEW แล้ว)
             try {
-                students = await fetchAllFromTable('data_student', '*', filterBuilder);
-            } catch (eSt) {
-                console.warn('fetchAllFromTable data_student error:', eSt);
+                const viewRows = await fetchAllFromTable('v_student_vaccine_complete', '*', filterBuilder);
+                if (viewRows && viewRows.length > 0) {
+                    studentsFromDb = viewRows;
+                    isLoadedFromView = true;
+                }
+            } catch (eView) {
+                // VIEW ยังไม่ได้สร้าง -> ใช้การ Real-time Merge ข้อมูลจาก data_student และ data
+            }
+
+            // 2. Real-time Merge (เชื่อม data_student เข้ากับ data โดยใช้ CID เป็น Primary Key)
+            if (!isLoadedFromView) {
+                let studentRows = [];
+                try {
+                    studentRows = await fetchAllFromTable('data_student', '*', filterBuilder);
+                } catch (eSt) {
+                    console.warn('fetchAllFromTable data_student error:', eSt);
+                }
+
+                // ดึงข้อมูลเด็กจากตาราง data (เด็กในเขต/เด็กนอกเขต ทั้งอำเภอเทพา) เพื่อดึงประวัติวัคซีนข้ามสถานพยาบาล
+                const dataMap = new Map();
+                try {
+                    const allDataRows = await fetchAllFromTable('data', '*');
+                    if (allDataRows && allDataRows.length > 0) {
+                        allDataRows.forEach(dr => {
+                            const rawCid = String(dr.CID || dr.cid || '').replace(/\D/g, '').trim();
+                            if (!rawCid) return;
+                            if (!dataMap.has(rawCid)) {
+                                dataMap.set(rawCid, { ...dr });
+                            } else {
+                                // หากมีหลายแถวใน data ให้รวมวัคซีนเข้าด้วยกัน
+                                const ex = dataMap.get(rawCid);
+                                V_KEYS.forEach(vk => {
+                                    if ((!ex[vk] || ex[vk] === '-' || ex[vk] === '0') && (dr[vk] && dr[vk] !== '-' && dr[vk] !== '0')) {
+                                        ex[vk] = dr[vk];
+                                    }
+                                });
+                                if (!ex.house && dr.house) ex.house = dr.house;
+                                if (!ex.moo && dr.moo) ex.moo = dr.moo;
+                                if (!ex.villname && dr.villname) ex.villname = dr.villname;
+                                if (!ex.subdistname && dr.subdistname) ex.subdistname = dr.subdistname;
+                                if (!ex.phone && dr.phone) ex.phone = dr.phone;
+                                if (!ex.father && dr.father) ex.father = dr.father;
+                                if (!ex.mother && dr.mother) ex.mother = dr.mother;
+                                if (!ex.VHV && dr.VHV) ex.VHV = dr.VHV;
+                            }
+                        });
+                    }
+                } catch (eDt) {
+                    console.warn('fetchAllFromTable data error while merging student vaccine:', eDt);
+                }
+
+                // ผสานข้อมูล: ยึด school และ class จาก data_student เสมอ แล้วรวมประวัติวัคซีนจากทั้ง 2 ตาราง
+                studentsFromDb = (studentRows || []).map(row => {
+                    const rowId = String(row.CID || row.cid || '').replace(/\D/g, '').trim();
+                    const dtMatch = rowId ? dataMap.get(rowId) : null;
+                    const mergedRow = { ...row };
+
+                    // รวมประวัติวัคซีน: ถ้าใน data_student ไม่มีหรือว่าง ให้ดึงจาก data
+                    V_KEYS.forEach(k => {
+                        const stVal = row[k];
+                        const dtVal = dtMatch ? dtMatch[k] : null;
+                        const isStValid = stVal && stVal !== '-' && stVal !== '0';
+                        const isDtValid = dtVal && dtVal !== '-' && dtVal !== '0';
+                        mergedRow[k] = isStValid ? stVal : (isDtValid ? dtVal : '');
+                    });
+
+                    // ยึด school และ class จาก data_student เสมอ
+                    mergedRow.school = row.school || (dtMatch ? dtMatch.school : '') || '-';
+                    mergedRow.class = row.class || (dtMatch ? dtMatch.class : '') || '-';
+                    mergedRow.school_hcode = row.hcode || '';
+                    mergedRow.home_hcode = dtMatch ? (dtMatch.hcode || '') : '';
+                    mergedRow.house = dtMatch ? (dtMatch.house || '') : '';
+                    mergedRow.moo = dtMatch ? (dtMatch.moo || '') : '';
+                    mergedRow.villname = dtMatch ? (dtMatch.villname || '') : '';
+                    mergedRow.subdistname = dtMatch ? (dtMatch.subdistname || '') : '';
+                    mergedRow.phone = dtMatch ? (dtMatch.phone || '') : '';
+                    mergedRow.father = dtMatch ? (dtMatch.father || '') : '';
+                    mergedRow.mother = dtMatch ? (dtMatch.mother || '') : '';
+                    mergedRow.VHV = dtMatch ? (dtMatch.VHV || '') : '';
+                    mergedRow.isMerged = !!dtMatch;
+
+                    return mergedRow;
+                });
             }
 
             // ดึงกลุ่มปฏิเสธวัคซีน
@@ -6616,20 +6706,22 @@
                 }
             } catch (tErr) {}
 
-            // ประเมินวัคซีนเด็กนักเรียนแต่ละคน
-            const evaluatedStudents = (students || []).map(row => {
+            // ประเมินวัคซีนเด็กนักเรียนแต่ละคนจากประวัติที่ผสานแล้ว
+            const evaluatedStudents = (studentsFromDb || []).map(row => {
                 const evalRes = (typeof evaluateChildVaccineStatus === 'function') 
                     ? evaluateChildVaccineStatus(row, refusedSet)
                     : { status: 'ครบตามเกณฑ์อายุ', missingVaccines: '' };
                 const rawDob = row.DOB || '';
                 const ageComputed = (typeof calculateAgeString === 'function') ? calculateAgeString(rawDob) : '-';
-                const rowId = String(row.CID || row.cid || '').trim();
+                const rowId = String(row.CID || row.cid || '').replace(/\D/g, '').trim();
                 const rowHn = String(row.HN || row.hn || '').trim();
-                const rowHcode = String(row.hcode || '').trim();
+                const rowHcode = String(row.school_hcode || row.hcode || '').trim();
                 const rowHname = (typeof getFacilityDisplayName === 'function') ? getFacilityDisplayName(rowHcode) : rowHcode;
+                const homeHcode = String(row.home_hcode || '').trim();
+                const homeHname = homeHcode ? ((typeof getFacilityDisplayName === 'function') ? getFacilityDisplayName(homeHcode) : homeHcode) : '';
 
                 return {
-                    id: rowId,
+                    id: rowId || String(row.id || ''),
                     cid: rowId,
                     hn: rowHn,
                     fullname: row.fullname || '-',
@@ -6640,6 +6732,17 @@
                     typearea: row.typearea || row.type || 1,
                     hcode: rowHcode,
                     hname: rowHname,
+                    homeHcode: homeHcode,
+                    homeHname: homeHname,
+                    house: row.house || '',
+                    moo: row.moo || '',
+                    villname: row.villname || '',
+                    subdistname: row.subdistname || '',
+                    phone: row.phone || '',
+                    father: row.father || '',
+                    mother: row.mother || '',
+                    vhv: row.VHV || '',
+                    isMergedWithData: row.isMerged !== false,
                     bcg: row.BCG || '',
                     hbv1: row.HBV1 || '',
                     dtp1: row['DTP+HB+Hib1'] || row['DTP-HB-Hib1'] || '',
@@ -27547,12 +27650,12 @@ window.exportDtpBySchoolExcel = async function() {
                                     <i class="fas fa-graduation-cap"></i>
                                 </span>
                                 รายงานข้อมูลวัคซีนนักเรียนในโรงเรียน / ศพด.
-                                <span style="background:#e0f2fe; color:#0369a1; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px; border:1px solid #bae6fd;">
-                                    ตาราง data_student
+                                <span style="background:#ecfdf5; color:#059669; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px; border:1px solid #a7f3d0;">
+                                    <i class="fas fa-link"></i> ผสานข้อมูล 2 ตาราง (data + data_student)
                                 </span>
                             </h2>
                             <p style="color:#64748b; font-size:13px; margin:4px 0 0 50px;">
-                                ระบบตรวจสอบ ติดตาม และส่งออกรายชื่อประวัติการรับวัคซีนของเด็กนักเรียนตามโรงเรียน/ศพด. อำเภอเทพา
+                                ระบบตรวจสอบ ติดตาม และส่งออกรายชื่อประวัติการรับวัคซีนของเด็กนักเรียนตามโรงเรียน/ศพด. อำเภอเทพา (ผสานประวัติวัคซีนเด็กนอกเขตสมบูรณ์)
                             </p>
                         </div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -27912,7 +28015,8 @@ window.exportDtpBySchoolExcel = async function() {
                         <div style="color:#64748b; font-size:11px;">HN: ${esc(s.hn || '-')}</div>
                     </td>
                     <td style="padding:10px 10px; font-weight:600; color:#0f172a;">
-                        ${esc(s.fullname)}
+                        <div>${esc(s.fullname)}</div>
+                        ${(s.house || s.moo || s.phone) ? `<div style="font-size:11px; color:#64748b; font-weight:normal; margin-top:2px;"><i class="fas fa-home" style="margin-right:2px; color:#94a3b8;"></i> ${esc(s.house ? 'บ.' + s.house : '')} ${esc(s.moo ? 'ม.' + s.moo : '')} ${esc(s.subdistname || '')} ${s.phone ? '<span style="color:#0284c7; margin-left:4px;">📞 ' + esc(s.phone) + '</span>' : ''}</div>` : ''}
                     </td>
                     <td style="padding:10px 8px; color:#475569;">
                         <div>${esc(s.birthDate || '-')}</div>
@@ -27925,7 +28029,8 @@ window.exportDtpBySchoolExcel = async function() {
                         <span style="background:#f1f5f9; padding:2px 8px; border-radius:6px; font-weight:600; font-size:11px; color:#475569;">${esc(s.class || '-')}</span>
                     </td>
                     <td style="padding:10px 8px; color:#475569; font-size:11px;">
-                        ${esc(s.hname || s.hcode || '-')}
+                        <div><i class="fas fa-hospital" style="color:#0284c7; margin-right:2px;"></i> ${esc(s.hname || s.hcode || '-')}</div>
+                        ${(s.homeHcode && s.homeHcode !== s.hcode) ? `<div style="font-size:10px; color:#ea580c; margin-top:2px;" title="เด็กนอกเขต/ภูมิลำเนาต่างสถานพยาบาล"><i class="fas fa-map-marker-alt"></i> ภูมิลำเนา: ${esc(s.homeHname || s.homeHcode)}</div>` : ''}
                     </td>
                     <td style="padding:10px 8px; text-align:center;">
                         ${statusBadge}
@@ -27958,12 +28063,14 @@ window.exportDtpBySchoolExcel = async function() {
 
             const rows = [
                 ['รายงานข้อมูลการรับวัคซีนของเด็กนักเรียน (ศูนย์พัฒนาเด็กเล็กและโรงเรียนประถม)'],
-                ['พื้นที่อำเภอเทพา จังหวัดสงขลา | ข้อมูลจากตาราง data_student'],
+                ['พื้นที่อำเภอเทพา จังหวัดสงขลา | ผสานข้อมูลประวัติวัคซีนครบถ้วนจาก 2 ตาราง (data + data_student)'],
                 ['วันที่ออกรายงาน: ' + dateStr + ' | จำนวนนักเรียนทั้งหมด: ' + data.length + ' คน'],
                 [],
                 [
-                    '#', 'รหัสสถานพยาบาล', 'สถานพยาบาล', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ - สกุล', 'วันเกิด', 'อายุ',
-                    'โรงเรียน / ศพด.', 'ชั้นเรียน', 'สถานะประเมิน', 'วัคซีนที่ขาด',
+                    '#', 'รหัสสถานพยาบาล (โรงเรียน)', 'สถานพยาบาล (โรงเรียน)', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ - สกุล', 'วันเกิด', 'อายุ',
+                    'โรงเรียน / ศพด.', 'ชั้นเรียน', 'ประเภทเด็ก (TypeArea)',
+                    'บ้านเลขที่', 'หมู่ที่', 'ชื่อหมู่บ้าน', 'ตำบล', 'เบอร์โทรศัพท์', 'ชื่อบิดา', 'ชื่อมารดา', 'อสม.',
+                    'รหัสสถานพยาบาลภูมิลำเนา', 'สถานพยาบาลภูมิลำเนา', 'สถานะประเมินวัคซีน', 'วัคซีนที่ขาด (ต้องติดตาม)',
                     'BCG', 'HBV1', 'DTP-HB-Hib1', 'Rota1', 'IPV1', 'DTP-HB-Hib2', 'Rota2', 'IPV2',
                     'DTP-HB-Hib3', 'OPV3', 'Rota3', 'MMR1', 'LJE1', 'DTP4', 'OPV4', 'MMR2', 'LJE2', 'DTP5', 'OPV5',
                     'PCV1', 'PCV2', 'PCV3'
@@ -27982,6 +28089,17 @@ window.exportDtpBySchoolExcel = async function() {
                     s.age || '',
                     s.school || '',
                     s.class || '',
+                    s.typearea || '1',
+                    s.house || '',
+                    s.moo || '',
+                    s.villname || '',
+                    s.subdistname || '',
+                    s.phone || '',
+                    s.father || '',
+                    s.mother || '',
+                    s.vhv || '',
+                    s.homeHcode || '',
+                    s.homeHname || '',
                     s.status || '',
                     s.missingVaccines || '',
                     s.bcg || '',
@@ -28087,15 +28205,16 @@ window.exportDtpBySchoolExcel = async function() {
 
             const makeHeaderRows = (schName, studentCount) => [
                 ['รายงานข้อมูลการรับวัคซีนของเด็กนักเรียน (Student Vaccine Coverage)'],
-                ['โรงเรียน/ศพด.: ' + schName + ' | อำเภอเทพา จังหวัดสงขลา'],
+                ['โรงเรียน/ศพด.: ' + schName + ' | อำเภอเทพา จังหวัดสงขลา | ผสานข้อมูลประวัติวัคซีนจาก 2 ตาราง (data + data_student)'],
                 ['วันที่ออกรายงาน: ' + dateStr + ' | จำนวนนักเรียน: ' + studentCount + ' คน'],
                 [],
                 [
                     '#', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ - สกุล', 'วันเกิด', 'อายุ', 'ชั้นเรียน',
+                    'ประเภทเด็ก (TypeArea)', 'บ้านเลขที่', 'หมู่ที่', 'ตำบล', 'เบอร์โทรศัพท์', 'ชื่อบิดา/มารดา',
                     'สถานะประเมินวัคซีน', 'วัคซีนที่ขาด (ต้องติดตาม)',
                     'BCG', 'HBV1', 'DTP1', 'Rota1', 'IPV1', 'DTP2', 'Rota2', 'IPV2',
                     'DTP3', 'OPV3', 'Rota3', 'MMR1', 'LJE1', 'DTP4', 'OPV4', 'MMR2', 'LJE2', 'DTP5', 'OPV5',
-                    'PCV1', 'PCV2', 'PCV3', 'สถานพยาบาล'
+                    'PCV1', 'PCV2', 'PCV3', 'สถานพยาบาล (โรงเรียน)', 'สถานพยาบาล (ภูมิลำเนา)'
                 ]
             ];
 
@@ -28107,6 +28226,12 @@ window.exportDtpBySchoolExcel = async function() {
                 s.birthDate || '',
                 s.age || '',
                 s.class || '',
+                s.typearea || '1',
+                s.house || '',
+                s.moo || '',
+                s.subdistname || '',
+                s.phone || '',
+                s.father || s.mother || '',
                 s.status || '',
                 s.missingVaccines || '',
                 s.bcg || '', s.hbv1 || '', s.dtp1 || '', s.rota1 || '', s.ipv1 || '',
@@ -28114,7 +28239,8 @@ window.exportDtpBySchoolExcel = async function() {
                 s.rota3 || '', s.mmr1 || '', s.lje1 || '', s.dtp4 || '', s.opv4 || '',
                 s.mmr2 || '', s.lje2 || '', s.dtp5 || '', s.opv5 || '',
                 s.pcv1 || '', s.pcv2 || '', s.pcv3 || '',
-                s.hname || s.hcode || ''
+                s.hname || s.hcode || '',
+                s.homeHname || s.homeHcode || ''
             ];
 
             if (selectedChoice === 'ALL_SHEETS') {
