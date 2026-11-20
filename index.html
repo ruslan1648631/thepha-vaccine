@@ -6446,6 +6446,30 @@
                 }
             } catch (tErr) {}
 
+            // ดึงข้อมูลโรงเรียนจาก data_student เพื่อเติมให้เด็กที่มีข้อมูลโรงเรียนว่างอยู่
+            const studentSchoolMap = new Map();
+            try {
+                const { data: stData } = await supabaseClient
+                    .from('data_student')
+                    .select('"CID", "HN", fullname, school')
+                    .not('school', 'is', null);
+                if (stData && stData.length > 0) {
+                    stData.forEach(st => {
+                        const c = String(st.CID || '').replace(/\D/g, '').trim();
+                        const unp = c.replace(/^0+/, '');
+                        const hn = String(st.HN || '').trim();
+                        const name = String(st.fullname || '').trim();
+                        const sch = String(st.school || '').trim();
+                        if (sch && sch !== '-' && sch !== '0') {
+                            if (c) studentSchoolMap.set(c, sch);
+                            if (unp) studentSchoolMap.set(unp, sch);
+                            if (hn) studentSchoolMap.set(hn, sch);
+                            if (name) studentSchoolMap.set(name, sch);
+                        }
+                    });
+                }
+            } catch (eSt) {}
+
             // Deduplicate & Merge Children (in-area)
             const childMap = new Map();
             (data || []).filter(isInAreaChild).forEach(row => {
@@ -6510,6 +6534,15 @@
                     gps: row.GPS || row.gps || row['\u0E1E\u0E34\u0E01\u0E31\u0E14'] || row.lat_lng || '-',
                     status: evalRes.status,
                     missingVaccines: evalRes.missingVaccines,
+                    school: (function() {
+                        const rSch = String(row.school || '').trim();
+                        if (rSch && rSch !== '-' && rSch !== '0') return rSch;
+                        const cId = String(row.CID || row.cid || '').replace(/\D/g, '').trim();
+                        const cUnp = cId.replace(/^0+/, '');
+                        const cHn = String(row.HN || row.hn || '').trim();
+                        const cName = String(row.fullname || row['ชื่อ-สกุล'] || '').trim();
+                        return studentSchoolMap.get(cId) || studentSchoolMap.get(cUnp) || studentSchoolMap.get(cHn) || studentSchoolMap.get(cName) || '-';
+                    })(),
                     rawRow: row
                 };
             });
@@ -6531,7 +6564,157 @@
             return { success: true, children };
         }
 
-                // 16.6 รายงานกลุ่มเป้าหมายวัคซีน PCV (เด็กที่เกิดตั้งแต่ 1 ต.ค. 2568)
+                // 16.8 รายงานข้อมูลวัคซีนนักเรียนในโรงเรียน/ศพด. (Get Student Vaccine Report)
+        if (fnName === 'getStudentVaccineReport') {
+            const filters = args[0] || {};
+            const userRoleNorm = String(filters.userRole || '').toLowerCase().trim();
+            const userHc = String(filters.userHcode || '').trim();
+            const userHcNorm = userHc.replace(/^0+/, '');
+            const isAdminAmpur = (userRoleNorm === 'admin_ampur' || userRoleNorm === 'admin');
+            const isSpecialOfficer = (userRoleNorm === 'เจ้าหน้าที่') && (userHcNorm === '860' || userHc === '00860' || userHc === '11390');
+            const canSeeAll = isAdminAmpur || isSpecialOfficer;
+
+            const filterBuilder = (q) => {
+                if (!canSeeAll && userHc) {
+                    const unp = userHcNorm;
+                    const pad = userHc.padStart(5, '0');
+                    q = q.or('hcode.eq.' + userHc + ',hcode.eq.' + unp + ',hcode.eq.' + pad);
+                } else if (filters.hcode && filters.hcode !== 'ทั้งหมด') {
+                    const unp = String(filters.hcode).replace(/^0+/, '');
+                    const pad = String(filters.hcode).padStart(5, '0');
+                    q = q.or('hcode.eq.' + filters.hcode + ',hcode.eq.' + unp + ',hcode.eq.' + pad);
+                }
+                if (filters.school && filters.school !== 'ทั้งหมด') {
+                    q = q.eq('school', filters.school);
+                }
+                if (filters.class && filters.class !== 'ทั้งหมด') {
+                    q = q.eq('class', filters.class);
+                }
+                return q;
+            };
+
+            let students = [];
+            try {
+                students = await fetchAllFromTable('data_student', '*', filterBuilder);
+            } catch (eSt) {
+                console.warn('fetchAllFromTable data_student error:', eSt);
+            }
+
+            // ถ้าใน data_student ยังไม่มีข้อมูล ให้ดึงสำรองจากตาราง data ที่มี school
+            if (!students || students.length === 0) {
+                try {
+                    const dataRows = await fetchAllFromTable('data', '*', (q) => {
+                        q = q.not('school', 'is', null).neq('school', '').neq('school', '-');
+                        return filterBuilder(q);
+                    });
+                    if (dataRows && dataRows.length > 0) {
+                        students = dataRows.map(r => ({
+                            hcode: r.hcode,
+                            CID: r.CID,
+                            HN: r.HN,
+                            fullname: r.fullname,
+                            DOB: r.DOB,
+                            school: r.school,
+                            class: r.class || '-',
+                            typearea: r.type || 1,
+                            BCG: r.BCG,
+                            HBV1: r.HBV1,
+                            'DTP+HB+Hib1': r['DTP+HB+Hib1'] || r['DTP-HB-Hib1'],
+                            Rota1: r.Rota1,
+                            IPV1: r.IPV1,
+                            'DTP+HB+Hib2': r['DTP+HB+Hib2'] || r['DTP-HB-Hib2'],
+                            Rota2: r.Rota2,
+                            IPV2: r.IPV2,
+                            'DTP+HB+Hib3': r['DTP+HB+Hib3'] || r['DTP-HB-Hib3'],
+                            OPV3: r.OPV3,
+                            Rota3: r.Rota3,
+                            MMR1: r.MMR1,
+                            LJE1: r.LJE1,
+                            DTP4: r.DTP4,
+                            OPV4: r.OPV4,
+                            MMR2: r.MMR2,
+                            LJE2: r.LJE2,
+                            DTP5: r.DTP5,
+                            OPV5: r.OPV5,
+                            PCV1: r.PCV1,
+                            PCV2: r.PCV2,
+                            PCV3: r.PCV3
+                        }));
+                    }
+                } catch(eFallback) {}
+            }
+
+            // ดึงกลุ่มปฏิเสธวัคซีน
+            const refusedSet = new Set();
+            try {
+                const { data: tData } = await supabaseClient
+                    .from('VCC_tracking')
+                    .select('ChildId, ChildName, Status')
+                    .eq('Status', 'ปฏิเสธวัคซีน');
+                if (tData) {
+                    tData.forEach(t => {
+                        if (t.ChildId) refusedSet.add(String(t.ChildId).trim());
+                        if (t.ChildName) refusedSet.add(String(t.ChildName).trim());
+                    });
+                }
+            } catch (tErr) {}
+
+            // ประเมินวัคซีนเด็กนักเรียนแต่ละคน
+            const evaluatedStudents = (students || []).map(row => {
+                const evalRes = (typeof evaluateChildVaccineStatus === 'function') 
+                    ? evaluateChildVaccineStatus(row, refusedSet)
+                    : { status: 'ครบตามเกณฑ์อายุ', missingVaccines: '' };
+                const rawDob = row.DOB || '';
+                const ageComputed = (typeof calculateAgeString === 'function') ? calculateAgeString(rawDob) : '-';
+                const rowId = String(row.CID || row.cid || '').trim();
+                const rowHn = String(row.HN || row.hn || '').trim();
+                const rowHcode = String(row.hcode || '').trim();
+                const rowHname = (typeof getFacilityDisplayName === 'function') ? getFacilityDisplayName(rowHcode) : rowHcode;
+
+                return {
+                    id: rowId,
+                    cid: rowId,
+                    hn: rowHn,
+                    fullname: row.fullname || '-',
+                    birthDate: rawDob,
+                    age: ageComputed,
+                    school: row.school || '-',
+                    class: row.class || '-',
+                    typearea: row.typearea || row.type || 1,
+                    hcode: rowHcode,
+                    hname: rowHname,
+                    bcg: row.BCG || '',
+                    hbv1: row.HBV1 || '',
+                    dtp1: row['DTP+HB+Hib1'] || row['DTP-HB-Hib1'] || '',
+                    rota1: row.Rota1 || '',
+                    ipv1: row.IPV1 || '',
+                    dtp2: row['DTP+HB+Hib2'] || row['DTP-HB-Hib2'] || '',
+                    rota2: row.Rota2 || '',
+                    ipv2: row.IPV2 || '',
+                    dtp3: row['DTP+HB+Hib3'] || row['DTP-HB-Hib3'] || '',
+                    opv3: row.OPV3 || '',
+                    rota3: row.Rota3 || '',
+                    mmr1: row.MMR1 || '',
+                    lje1: row.LJE1 || '',
+                    dtp4: row.DTP4 || '',
+                    opv4: row.OPV4 || '',
+                    mmr2: row.MMR2 || '',
+                    lje2: row.LJE2 || '',
+                    dtp5: row.DTP5 || '',
+                    opv5: row.OPV5 || '',
+                    pcv1: row.PCV1 || '',
+                    pcv2: row.PCV2 || '',
+                    pcv3: row.PCV3 || '',
+                    status: evalRes.status,
+                    missingVaccines: evalRes.missingVaccines,
+                    rawRow: row
+                };
+            });
+
+            return { success: true, students: evaluatedStudents };
+        }
+
+        // 16.6 รายงานกลุ่มเป้าหมายวัคซีน PCV (เด็กที่เกิดตั้งแต่ 1 ต.ค. 2568)
         if (fnName === 'getPcvTargetReport') {
             const filters = args[0] || {};
             const userRoleNorm = String(filters.userRole || '').toLowerCase().trim();
@@ -7272,7 +7455,7 @@
                 console.warn('getDtpOutbreakReport: could not fetch refused table', eRef);
             }
 
-            // ดึงข้อมูลโรงเรียน/ศพด. จาก VCC_tracking
+            // ดึงข้อมูลโรงเรียน/ศพด. จาก VCC_tracking และ data_student
             const schoolMap = new Map();
             try {
                 const { data: trackSchools } = await supabaseClient
@@ -7295,6 +7478,35 @@
                 }
             } catch (eSch) {
                 console.warn('getDtpOutbreakReport: could not fetch schools from VCC_tracking', eSch);
+            }
+
+            // ดึงข้อมูลโรงเรียนจาก data_student เพื่อเติมให้เด็กที่มีข้อมูลโรงเรียนว่างอยู่
+            try {
+                const { data: studentSchools } = await supabaseClient
+                    .from('data_student')
+                    .select('"CID", "HN", fullname, school, class')
+                    .not('school', 'is', null);
+                if (studentSchools && studentSchools.length > 0) {
+                    studentSchools.forEach(st => {
+                        const rawCid = String(st.CID || '').trim();
+                        const cleanC = rawCid.replace(/\D/g, '').trim();
+                        const unpC = cleanC.replace(/^0+/, '');
+                        const hn = String(st.HN || '').trim();
+                        const name = String(st.fullname || '').trim();
+                        const normN = name.replace(/\s+/g, '');
+                        const sch = String(st.school || '').trim();
+                        if (sch && sch !== '-' && sch !== '0') {
+                            if (cleanC && !schoolMap.has(cleanC)) schoolMap.set(cleanC, sch);
+                            if (unpC && !schoolMap.has(unpC)) schoolMap.set(unpC, sch);
+                            if (rawCid && !schoolMap.has(rawCid)) schoolMap.set(rawCid, sch);
+                            if (hn && !schoolMap.has(hn)) schoolMap.set(hn, sch);
+                            if (name && !schoolMap.has(name)) schoolMap.set(name, sch);
+                            if (normN && !schoolMap.has(normN)) schoolMap.set(normN, sch);
+                        }
+                    });
+                }
+            } catch (eSt) {
+                console.warn('getDtpOutbreakReport: data_student query (optional):', eSt);
             }
 
             // ตรวจสอบและ Deduplicate รายชื่อเด็ก
@@ -7407,18 +7619,27 @@
                     status = 'ยังไม่ถึงเกณฑ์ (< 2 เดือน)';
                     statusCode = 'not_due';
                 } else if (hasAnyMissed) {
-                    status = 'ขาดวัคซีนคอตีบ (เป้าหมายเร่งรัด)';
+                    status = 'ขาดวัคซีนคอตีบไอกรน (เป้าหมายเร่งรัด)';
                     statusCode = 'missed';
                 } else {
                     status = 'ครบตามเกณฑ์อายุ';
                     statusCode = 'complete';
                 }
 
+                const childSchool = schoolMap.get(cleanCid) || 
+                                    schoolMap.get(unpaddedCid) || 
+                                    schoolMap.get(rowId) || 
+                                    schoolMap.get(rowHn) || 
+                                    schoolMap.get(rowName) || 
+                                    schoolMap.get(normName) || 
+                                    row.school || '';
+
                 children.push({
                     id: rowId,
                     cid: rowId,
                     hn: rowHn,
                     fullname: rowName,
+                    school: childSchool,
                     birthDate: rawDob,
                     isoDob: isoDob,
                     age: ageComputed || '-',
@@ -12155,7 +12376,7 @@ const PAGE_TITLES = {
     coverage: 'ความครอบคลุมวัคซีน',
     duplicateReport: 'ตรวจสอบเด็กคนเดียว อยู่หลายสถานพยาบาล (เลขบัตรประชาชนซ้ำ)',
     outOfAreaChildren: 'ค้นหารายชื่อเด็กนอกเขต (Type 4)',
-    dtpReport: 'รายงานตรวจสอบและติดตามวัคซีนคอตีบ (DTP Outbreak Response)',
+    dtpReport: 'รายงานตรวจสอบและติดตามวัคซีนคอตีบไอกรน (DTP Outbreak Response)',
     pcvTarget: 'รายงานกลุ่มเป้าหมายวัคซีน PCV (เด็กเกิดตั้งแต่ 1 ต.ค. 2568)',
     vaccineStock: 'คลังวัคชีนและเวชภัณฑ์ (Stock)',
 };
@@ -18503,35 +18724,32 @@ function updateBottomNavActive(page) {
             const facEl = document.getElementById('officerFacility');
             const targetHcode = facEl ? facEl.value : (APP.currentUser && APP.currentUser.hcode ? APP.currentUser.hcode : '');
 
-            // ดึงเด็กในหมู่บ้านนี้
+            // ดึงเด็กทั้งหมดของสถานพยาบาล แล้วกรองหมู่ที่ฝั่ง client
             const res = await callGAS('getChildren', [{
                 userRole: APP.currentUser ? APP.currentUser.role : '',
                 userHcode: targetHcode,
-                hcode: targetHcode,
-                village: selectedVillage
+                hcode: targetHcode
             }]);
 
-            let children = (res && res.success && res.children) ? res.children : [];
+            const allChildren = (res && res.success && res.children) ? res.children : [];
 
-            // ถ้าผลลัพธ์ว่าง ลองกรองด้วยชื่อหมู่บ้านหรือเลขหมู่จากข้อมูลสถานพยาบาล
-            if (children.length === 0) {
-                const allRes = await callGAS('getChildren', [{
-                    userRole: APP.currentUser ? APP.currentUser.role : '',
-                    userHcode: targetHcode,
-                    hcode: targetHcode
-                }]);
-                if (allRes && allRes.success && allRes.children) {
-                    const vNum = selectedVillage.replace(/\D/g, '');
-                    children = allRes.children.filter(c => {
-                        const cMoo = String(c.village || '').trim();
-                        const cVillName = String(c.villageName || '').trim();
-                        if (cMoo === selectedVillage || cVillName === selectedVillage) return true;
-                        if (vNum && cMoo.replace(/\D/g, '') === vNum) return true;
-                        if (selectedVillage.includes(cVillName) && cVillName.length > 2) return true;
-                        return false;
-                    });
-                }
-            }
+            // สกัดเลขหมู่จาก selectedVillage (เช่น "หมู่ที่ 3 บ้านทุ่งโดน" → "3")
+            const vNumMatch = selectedVillage.match(/(\d+)/);
+            const vNum = vNumMatch ? vNumMatch[1] : '';
+            // สกัดชื่อหมู่บ้าน (ส่วนหลัง "หมู่ที่ X " หรือทั้ง string)
+            const vNamePart = selectedVillage.replace(/หมู่ที่\s*\d+\s*/g, '').trim();
+
+            let children = allChildren.filter(c => {
+                const cMoo = String(c.village || '').replace(/^0+/, '').trim(); // เลขหมู่ ไม่มี leading zero
+                const cVillName = String(c.villageName || '').trim();
+                // เทียบเลขหมู่
+                if (vNum && (cMoo === vNum || cMoo === String(parseInt(vNum)))) return true;
+                // เทียบชื่อหมู่บ้าน
+                if (vNamePart && cVillName && (cVillName.includes(vNamePart) || vNamePart.includes(cVillName))) return true;
+                // เทียบ selectedVillage ทั้ง string กับ villageName
+                if (cVillName && selectedVillage.includes(cVillName) && cVillName.length > 2) return true;
+                return false;
+            });
 
             // จัดเรียงตามชื่อเด็ก
             children.sort((a, b) => String(a.fullname || '').localeCompare(String(b.fullname || ''), 'th'));
@@ -24938,7 +25156,7 @@ async function loadDtpReportPage() {
         document.getElementById('contentArea').appendChild(page);
     }
     page.classList.add('active');
-    showLoading('กำลังโหลดข้อมูลรายงานวัคซีนคอตีบ...');
+    showLoading('กำลังโหลดข้อมูลรายงานวัคซีนคอตีบไอกรน...');
 
     try {
         const fRes = await callGAS('getFacilityMap', []);
@@ -24961,11 +25179,11 @@ async function loadDtpReportPage() {
                 <div>
                     <div class="page-title" style="margin-bottom:4px; display:flex; align-items:center; gap:8px;">
                         <i class="fas fa-shield-virus" style="color:#dc2626; font-size:24px;"></i>
-                        <span style="font-size:20px; font-weight:700; color:#0f172a;">รายงานตรวจสอบและส่งออกรายชื่อเด็กที่ยังไม่ได้วัคซีนคอตีบ</span>
+                        <span style="font-size:20px; font-weight:700; color:#0f172a;">รายงานตรวจสอบและส่งออกรายชื่อเด็กที่ยังไม่ได้วัคซีนคอตีบไอกรน</span>
                         <span style="background:#dc2626; color:white; font-size:11px; padding:3px 10px; border-radius:12px; font-weight:700; letter-spacing:0.5px;">พื้นที่ระบาด</span>
                     </div>
                     <div style="color:#64748b; font-size:13px;">
-                        ระบบเฝ้าระวัง ติดตาม และเร่งรัดความครอบคลุมวัคซีนคอตีบ (DTP-HB-Hib และ DTP) อำเภอเทพา ตามเกณฑ์สร้างเสริมภูมิคุ้มกันโรค สธ. ปี 2569
+                        ระบบเฝ้าระวัง ติดตาม และเร่งรัดความครอบคลุมวัคซีนคอตีบไอกรน (DTP-HB-Hib และ DTP) อำเภอเทพา ตามเกณฑ์สร้างเสริมภูมิคุ้มกันโรค สธ. ปี 2569
                     </div>
                 </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -24998,7 +25216,7 @@ async function loadDtpReportPage() {
                             <i class="fas fa-biohazard"></i>
                         </div>
                         <div>
-                            <h4 style="margin:0; font-size:16px; font-weight:700; color:#991b1b;">แผนเร่งรัดและเฝ้าระวังวัคซีนคอตีบในพื้นที่ระบาด (Diphtheria Outbreak Response 2569)</h4>
+                            <h4 style="margin:0; font-size:16px; font-weight:700; color:#991b1b;">แผนเร่งรัดและเฝ้าระวังวัคซีนคอตีบไอกรนในพื้นที่ระบาด (DTP Outbreak Response 2569)</h4>
                             <span style="font-size:12.5px; color:#7f1d1d;">เกณฑ์อายุที่ต้องได้รับวัคซีนคอตีบตามตารางสร้างเสริมภูมิคุ้มกันโรค (EPI MOPH 2569)</span>
                         </div>
                     </div>
@@ -25092,7 +25310,7 @@ async function loadDtpReportPage() {
                         <i class="fas fa-percentage"></i>
                     </div>
                     <div>
-                        <div style="font-size:11px; color:#64748b; font-weight:600;">ความครอบคลุมคอตีบ</div>
+                        <div style="font-size:11px; color:#64748b; font-weight:600;">ความครอบคลุมคอตีบไอกรน</div>
                         <div id="dtpStatCoverage" style="font-size:22px; font-weight:700; color:#4338ca;">0%</div>
                     </div>
                 </div>
@@ -25101,7 +25319,7 @@ async function loadDtpReportPage() {
             <!-- กล่องสรุปจำแนกเด็กขาดนัดแยกรายเข็ม -->
             <div style="background:white; border-radius:12px; padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
                 <div style="font-size:13px; font-weight:700; color:#334155; display:flex; align-items:center; gap:6px;">
-                    <i class="fas fa-syringe" style="color:#dc2626;"></i> จำแนกเด็กขาดวัคซีนคอตีบแยกรายเข็ม (คน):
+                    <i class="fas fa-syringe" style="color:#dc2626;"></i> จำแนกเด็กขาดวัคซีนคอตีบไอกรนแยกรายเข็ม (คน):
                 </div>
                 <div id="dtpDoseBreakdown" style="display:flex; flex-wrap:wrap; gap:8px;">
                     <span style="background:#fee2e2; color:#b91c1c; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600;">DTP1: <strong id="dtpDose1Count">0</strong></span>
@@ -25251,7 +25469,21 @@ async function loadDtpReportPage() {
         const schoolExpBtn = document.getElementById('dtpExportBySchoolBtn');
         if (schoolExpBtn) schoolExpBtn.addEventListener('click', exportDtpBySchoolExcel);
         const dtpTgBtn = document.getElementById('dtpTelegramBtn');
-        if (dtpTgBtn) dtpTgBtn.addEventListener('click', () => sendDtpOutbreakToTelegram(false));
+        if (dtpTgBtn) dtpTgBtn.addEventListener('click', async () => {
+            const confirm = await Swal.fire({
+                title: 'ยืนยันส่งรายงานเข้า Telegram?',
+                text: 'ต้องการส่งสรุปรายงานเฝ้าระวังวัคซีนคอตีบไอกรนเข้ากลุ่ม Telegram ทันทีหรือไม่?',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#0284c7',
+                cancelButtonColor: '#64748b',
+                confirmButtonText: 'ยืนยันส่งทันที',
+                cancelButtonText: 'ยกเลิก'
+            });
+            if (confirm.isConfirmed) {
+                sendDtpOutbreakToTelegram(false);
+            }
+        });
         document.getElementById('dtpPrintOutreachBtn').addEventListener('click', printDtpOutreachSheet);
 
     } catch (err) {
@@ -25266,7 +25498,7 @@ async function fetchAndRenderDtpData(forceRefresh = false) {
     if (forceRefresh) {
         window.DTP_RAW_CHILDREN = null;
     }
-    showLoading('กำลังประมวลผลรายชื่อเด็กตรวจสอบวัคซีนคอตีบตรงจากฐานข้อมูล...');
+    showLoading('กำลังประมวลผลรายชื่อเด็กตรวจสอบวัคซีนคอตีบไอกรนตรงจากฐานข้อมูล...');
     try {
         const facEl = document.getElementById('dtpFacility');
         const isAdminAmpur = isAdminAmpurUser();
@@ -27306,6 +27538,662 @@ window.exportDtpBySchoolExcel = async function() {
 
     
     // ============================================================
+    // ระบบรายงานข้อมูลวัคซีนนักเรียนในโรงเรียน/ศพด. (STUDENT VACCINE MODULE)
+    // ============================================================
+    window.STUDENT_RAW_DATA = [];
+    window.STUDENT_FILTERED_DATA = [];
+    window.STUDENT_PAGE_SIZE = 50;
+    window.STUDENT_CURRENT_PAGE = 1;
+
+    async function loadStudentVaccinePage() {
+        let page = document.getElementById('studentVaccinePage');
+        if (!page) {
+            page = document.createElement('div');
+            page.id = 'studentVaccinePage';
+            page.className = 'page';
+            const cont = document.querySelector('.page-content') || document.querySelector('.main-content');
+            if (cont) cont.appendChild(page);
+        }
+
+        showLoading('กำลังโหลดข้อมูลวัคซีนนักเรียน...');
+        try {
+            const fRes = await callGAS('getFacilityMap', []);
+            const facilityMap = (fRes && fRes.success) ? fRes.data : (APP.facilityMap || {});
+
+            const isAdminAmpur = isAdminAmpurUser();
+            const isSpecialOfficer = isSpecialOfficerUser();
+            const canSelectAll = isAdminAmpur || isSpecialOfficer;
+
+            let facilityOptions = '';
+            if (canSelectAll) {
+                facilityOptions = '<option value="ทั้งหมด">-- ทุกสถานพยาบาล --</option>';
+                Object.keys(facilityMap).sort().forEach(hc => {
+                    facilityOptions += '<option value="' + esc(hc) + '">' + esc(hc) + ' : ' + esc(facilityMap[hc]) + '</option>';
+                });
+            } else {
+                const uHc = APP.currentUser ? APP.currentUser.hcode : '';
+                const uName = facilityMap[uHc] || (APP.currentUser ? APP.currentUser.hospital : '') || uHc;
+                facilityOptions = '<option value="' + esc(uHc) + '" selected>' + esc(uHc) + ' : ' + esc(uName) + '</option>';
+            }
+
+            page.innerHTML = `
+                <div class="page-header" style="margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                        <div>
+                            <h2 style="font-size:22px; font-weight:700; color:#1e293b; margin:0; display:flex; align-items:center; gap:10px;">
+                                <span style="background:linear-gradient(135deg, #0284c7, #0369a1); color:white; width:40px; height:40px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(2,132,199,0.3);">
+                                    <i class="fas fa-graduation-cap"></i>
+                                </span>
+                                รายงานข้อมูลวัคซีนนักเรียนในโรงเรียน / ศพด.
+                                <span style="background:#e0f2fe; color:#0369a1; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px; border:1px solid #bae6fd;">
+                                    ตาราง data_student
+                                </span>
+                            </h2>
+                            <p style="color:#64748b; font-size:13px; margin:4px 0 0 50px;">
+                                ระบบตรวจสอบ ติดตาม และส่งออกรายชื่อประวัติการรับวัคซีนของเด็กนักเรียนตามโรงเรียน/ศพด. อำเภอเทพา
+                            </p>
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                            <span id="studentLastUpdated" style="font-size:12px; color:#64748b; background:#f1f5f9; padding:6px 12px; border-radius:8px; display:inline-flex; align-items:center; gap:6px;">
+                                <i class="fas fa-clock"></i> ยังไม่ได้ประมวลผล
+                            </span>
+                            <button id="studentProcessBtn" class="btn" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(2,132,199,0.25);">
+                                <i class="fas fa-sync-alt"></i> ประมวลผลข้อมูล
+                            </button>
+                            <button id="studentExportBtn" class="btn" style="background:#10b981; color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(16,185,129,0.25);">
+                                <i class="fas fa-file-excel"></i> ส่งออก Excel (ตามตัวกรอง)
+                            </button>
+                            <button id="studentExportBySchoolBtn" class="btn" style="background:#3b82f6; color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(59,130,246,0.25);">
+                                <i class="fas fa-school"></i> ส่งออกแยกรายโรงเรียน
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STATS CARDS -->
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">
+                    <div style="background:#ffffff; border-radius:12px; padding:16px; border:1px solid #e2e8f0; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-size:12px; font-weight:600; color:#64748b;">นักเรียนทั้งหมด</span>
+                            <span style="background:#e0f2fe; color:#0284c7; width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; font-size:13px;"><i class="fas fa-user-graduate"></i></span>
+                        </div>
+                        <div style="font-size:24px; font-weight:700; color:#0f172a;" id="stStatTotal">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                    <div style="background:#ffffff; border-radius:12px; padding:16px; border:1px solid #fed7aa; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-size:12px; font-weight:600; color:#c2410c;">ขาดวัคซีน (ต้องติดตาม)</span>
+                            <span style="background:#ffedd5; color:#ea580c; width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; font-size:13px;"><i class="fas fa-exclamation-triangle"></i></span>
+                        </div>
+                        <div style="font-size:24px; font-weight:700; color:#dc2626;" id="stStatMissed">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                    <div style="background:#ffffff; border-radius:12px; padding:16px; border:1px solid #bbf7d0; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-size:12px; font-weight:600; color:#15803d;">ครบตามเกณฑ์อายุ</span>
+                            <span style="background:#dcfce7; color:#16a34a; width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; font-size:13px;"><i class="fas fa-check-circle"></i></span>
+                        </div>
+                        <div style="font-size:24px; font-weight:700; color:#16a34a;" id="stStatComplete">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                    <div style="background:#ffffff; border-radius:12px; padding:16px; border:1px solid #fef08a; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-size:12px; font-weight:600; color:#a16207;">ปฏิเสธวัคซีน</span>
+                            <span style="background:#fef9c3; color:#ca8a04; width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; font-size:13px;"><i class="fas fa-hand-paper"></i></span>
+                        </div>
+                        <div style="font-size:24px; font-weight:700; color:#ca8a04;" id="stStatRefused">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                    <div style="background:#ffffff; border-radius:12px; padding:16px; border:1px solid #bae6fd; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-size:12px; font-weight:600; color:#0369a1;">ความครอบคลุมวัคซีน</span>
+                            <span style="background:#e0f2fe; color:#0284c7; width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; font-size:13px;"><i class="fas fa-percentage"></i></span>
+                        </div>
+                        <div style="font-size:24px; font-weight:700; color:#0284c7;" id="stStatCoverage">0%</div>
+                    </div>
+                </div>
+
+                <!-- FILTER BAR -->
+                <div style="background:#ffffff; border-radius:12px; padding:16px; border:1px solid #e2e8f0; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; align-items:end;">
+                        <div>
+                            <label style="font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:4px;">สถานพยาบาล</label>
+                            <select id="stFacilityFilter" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13px;">
+                                ${facilityOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:4px;">โรงเรียน / ศูนย์พัฒนาเด็กเล็ก</label>
+                            <select id="stSchoolFilter" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13px;">
+                                <option value="ทั้งหมด">-- ทุกโรงเรียน / ศพด. --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:4px;">ชั้นเรียน</label>
+                            <select id="stClassFilter" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13px;">
+                                <option value="ทั้งหมด">-- ทุกชั้นเรียน --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:4px;">สถานะประเมินวัคซีน</label>
+                            <select id="stStatusFilter" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13px;">
+                                <option value="ทั้งหมด">-- ทุกสถานะ --</option>
+                                <option value="missed">❌ ขาดวัคซีน (ต้องติดตาม)</option>
+                                <option value="complete">✅ ครบตามเกณฑ์อายุ</option>
+                                <option value="refused">⚠️ ปฏิเสธวัคซีน</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:4px;">ค้นหา (เลขบัตร / HN / ชื่อ-สกุล)</label>
+                            <div style="position:relative;">
+                                <input type="text" id="stSearchInput" placeholder="พิมพ์เพื่อค้นหา..." style="width:100%; padding:8px 12px 8px 32px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:13px;">
+                                <i class="fas fa-search" style="position:absolute; left:10px; top:11px; color:#94a3b8; font-size:12px;"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABLE CONTAINER -->
+                <div style="background:#ffffff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="padding:12px 16px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; background:#f8fafc;">
+                        <span style="font-weight:600; font-size:14px; color:#1e293b;" id="stTableInfoBadge">แสดง 0 รายการ</span>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <button id="stPrevPageBtn" class="btn" style="background:#fff; border:1px solid #cbd5e1; padding:4px 10px; border-radius:6px; font-size:12px; cursor:pointer;" disabled><i class="fas fa-chevron-left"></i> ก่อนหน้า</button>
+                            <span id="stPageIndicator" style="font-size:12px; color:#64748b;">หน้า 1 / 1</span>
+                            <button id="stNextPageBtn" class="btn" style="background:#fff; border:1px solid #cbd5e1; padding:4px 10px; border-radius:6px; font-size:12px; cursor:pointer;" disabled>ถัดไป <i class="fas fa-chevron-right"></i></button>
+                        </div>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+                            <thead>
+                                <tr style="background:#f1f5f9; color:#475569; font-weight:700; border-bottom:2px solid #e2e8f0; white-space:nowrap;">
+                                    <th style="padding:10px 8px; text-align:center; width:40px;">#</th>
+                                    <th style="padding:10px 10px;">เลขประจำตัวประชาชน / HN</th>
+                                    <th style="padding:10px 10px;">ชื่อ - สกุล</th>
+                                    <th style="padding:10px 8px;">ว/ด/ป เกิด (อายุ)</th>
+                                    <th style="padding:10px 10px;">โรงเรียน / ศูนย์พัฒนาเด็กเล็ก</th>
+                                    <th style="padding:10px 8px; text-align:center;">ชั้นเรียน</th>
+                                    <th style="padding:10px 8px;">สถานพยาบาล</th>
+                                    <th style="padding:10px 8px; text-align:center;">สถานะวัคซีน</th>
+                                    <th style="padding:10px 8px; text-align:center;">วัคซีนที่ขาด</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stTableBody">
+                                <tr>
+                                    <td colspan="9" style="text-align:center; padding:40px; color:#94a3b8;">
+                                        <i class="fas fa-spinner fa-spin" style="font-size:24px; margin-bottom:8px; display:block;"></i>
+                                        กำลังโหลดข้อมูล...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+            // Bind Events
+            document.getElementById('studentProcessBtn').addEventListener('click', () => fetchAndRenderStudentData(true));
+            document.getElementById('studentExportBtn').addEventListener('click', exportStudentVaccineExcel);
+            document.getElementById('studentExportBySchoolBtn').addEventListener('click', exportStudentBySchoolExcel);
+
+            document.getElementById('stFacilityFilter').addEventListener('change', () => fetchAndRenderStudentData(true));
+            document.getElementById('stSchoolFilter').addEventListener('change', filterAndDisplayStudentTable);
+            document.getElementById('stClassFilter').addEventListener('change', filterAndDisplayStudentTable);
+            document.getElementById('stStatusFilter').addEventListener('change', filterAndDisplayStudentTable);
+            document.getElementById('stSearchInput').addEventListener('input', debounce(filterAndDisplayStudentTable, 300));
+
+            document.getElementById('stPrevPageBtn').addEventListener('click', () => {
+                if (window.STUDENT_CURRENT_PAGE > 1) {
+                    window.STUDENT_CURRENT_PAGE--;
+                    renderStudentTableRows();
+                }
+            });
+
+            document.getElementById('stNextPageBtn').addEventListener('click', () => {
+                const totalPages = Math.ceil(window.STUDENT_FILTERED_DATA.length / window.STUDENT_PAGE_SIZE) || 1;
+                if (window.STUDENT_CURRENT_PAGE < totalPages) {
+                    window.STUDENT_CURRENT_PAGE++;
+                    renderStudentTableRows();
+                }
+            });
+
+            // Initial Fetch
+            fetchAndRenderStudentData(false);
+
+        } catch (err) {
+            console.error('loadStudentVaccinePage error:', err);
+            page.innerHTML = '<div class="error-message">เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + esc(err.message) + '</div>';
+        } finally {
+            hideLoading();
+        }
+    }
+    window.loadStudentVaccinePage = loadStudentVaccinePage;
+
+    // ดึงข้อมูลนักเรียนจาก Backend
+    async function fetchAndRenderStudentData(forceRefresh = false) {
+        showLoading('กำลังประมวลผลข้อมูลนักเรียนจากฐานข้อมูล...');
+        try {
+            const facEl = document.getElementById('stFacilityFilter');
+            const hcode = facEl ? facEl.value : 'ทั้งหมด';
+
+            const res = await callGAS('getStudentVaccineReport', [{
+                hcode: hcode,
+                userRole: APP.currentUser ? APP.currentUser.role : '',
+                userHcode: APP.currentUser ? APP.currentUser.hcode : ''
+            }]);
+
+            const students = (res && res.success && res.students) ? res.students : [];
+            window.STUDENT_RAW_DATA = students;
+
+            // อัปเดต dropdown โรงเรียนและชั้นเรียน
+            populateStudentFilterDropdowns(students);
+
+            // แสดงเวลาอัปเดต
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('th-TH');
+            const dateStr = now.toLocaleDateString('th-TH');
+            const el = document.getElementById('studentLastUpdated');
+            if (el) el.innerHTML = '<i class="fas fa-check-circle" style="color:#10b981;"></i> อัปเดตล่าสุด: ' + dateStr + ' ' + timeStr;
+
+            filterAndDisplayStudentTable();
+        } catch (e) {
+            console.error('fetchAndRenderStudentData error:', e);
+            window.STUDENT_RAW_DATA = [];
+            filterAndDisplayStudentTable();
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function populateStudentFilterDropdowns(students) {
+        const schEl = document.getElementById('stSchoolFilter');
+        const clsEl = document.getElementById('stClassFilter');
+        if (!schEl || !clsEl) return;
+
+        const currentSch = schEl.value;
+        const currentCls = clsEl.value;
+
+        const schoolSet = new Set();
+        const classSet = new Set();
+
+        (students || []).forEach(s => {
+            const sch = String(s.school || '').trim();
+            const cls = String(s.class || '').trim();
+            if (sch && sch !== '-' && sch !== '0') schoolSet.add(sch);
+            if (cls && cls !== '-' && cls !== '0') classSet.add(cls);
+        });
+
+        const schools = Array.from(schoolSet).sort((a, b) => a.localeCompare(b, 'th'));
+        const classes = Array.from(classSet).sort((a, b) => a.localeCompare(b, 'th'));
+
+        let schOpts = '<option value="ทั้งหมด">-- ทุกโรงเรียน / ศพด. --</option>';
+        schools.forEach(s => {
+            schOpts += '<option value="' + esc(s) + '" ' + (currentSch === s ? 'selected' : '') + '>' + esc(s) + '</option>';
+        });
+        schEl.innerHTML = schOpts;
+
+        let clsOpts = '<option value="ทั้งหมด">-- ทุกชั้นเรียน --</option>';
+        classes.forEach(c => {
+            clsOpts += '<option value="' + esc(c) + '" ' + (currentCls === c ? 'selected' : '') + '>' + esc(c) + '</option>';
+        });
+        clsEl.innerHTML = clsOpts;
+    }
+
+    function filterAndDisplayStudentTable() {
+        const schEl = document.getElementById('stSchoolFilter');
+        const clsEl = document.getElementById('stClassFilter');
+        const stsEl = document.getElementById('stStatusFilter');
+        const srcEl = document.getElementById('stSearchInput');
+
+        const selectedSchool = schEl ? schEl.value : 'ทั้งหมด';
+        const selectedClass = clsEl ? clsEl.value : 'ทั้งหมด';
+        const selectedStatus = stsEl ? stsEl.value : 'ทั้งหมด';
+        const searchKeyword = (srcEl ? srcEl.value : '').toLowerCase().trim();
+
+        let filtered = (window.STUDENT_RAW_DATA || []).filter(s => {
+            if (selectedSchool !== 'ทั้งหมด' && s.school !== selectedSchool) return false;
+            if (selectedClass !== 'ทั้งหมด' && s.class !== selectedClass) return false;
+
+            if (selectedStatus === 'missed' && s.status !== 'ขาดวัคซีน' && !s.status.includes('ขาด')) return false;
+            if (selectedStatus === 'complete' && !s.status.includes('ครบ')) return false;
+            if (selectedStatus === 'refused' && !s.status.includes('ปฏิเสธ')) return false;
+
+            if (searchKeyword) {
+                const matchCid = String(s.cid || '').toLowerCase().includes(searchKeyword);
+                const matchHn = String(s.hn || '').toLowerCase().includes(searchKeyword);
+                const matchName = String(s.fullname || '').toLowerCase().includes(searchKeyword);
+                const matchSch = String(s.school || '').toLowerCase().includes(searchKeyword);
+                if (!matchCid && !matchHn && !matchName && !matchSch) return false;
+            }
+
+            return true;
+        });
+
+        window.STUDENT_FILTERED_DATA = filtered;
+        window.STUDENT_CURRENT_PAGE = 1;
+
+        // อัปเดตสถิติ
+        updateStudentStats(filtered);
+
+        // แสดงผลตาราง
+        renderStudentTableRows();
+    }
+
+    function updateStudentStats(students) {
+        let total = (students || []).length;
+        let complete = 0;
+        let missed = 0;
+        let refused = 0;
+
+        (students || []).forEach(s => {
+            if (s.status.includes('ครบ')) complete++;
+            else if (s.status.includes('ปฏิเสธ')) refused++;
+            else missed++;
+        });
+
+        const cov = total > 0 ? Math.round((complete / total) * 100) : 0;
+
+        const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        setTxt('stStatTotal', total.toLocaleString() + ' คน');
+        setTxt('stStatComplete', complete.toLocaleString() + ' คน');
+        setTxt('stStatMissed', missed.toLocaleString() + ' คน');
+        setTxt('stStatRefused', refused.toLocaleString() + ' คน');
+        setTxt('stStatCoverage', cov + '%');
+    }
+
+    function renderStudentTableRows() {
+        const tbody = document.getElementById('stTableBody');
+        const badge = document.getElementById('stTableInfoBadge');
+        const prevBtn = document.getElementById('stPrevPageBtn');
+        const nextBtn = document.getElementById('stNextPageBtn');
+        const ind = document.getElementById('stPageIndicator');
+        if (!tbody) return;
+
+        const data = window.STUDENT_FILTERED_DATA || [];
+        const total = data.length;
+        const pageSize = window.STUDENT_PAGE_SIZE;
+        const totalPages = Math.ceil(total / pageSize) || 1;
+        const currPage = window.STUDENT_CURRENT_PAGE;
+
+        if (badge) badge.textContent = 'แสดง ' + total.toLocaleString() + ' รายการ';
+        if (ind) ind.textContent = 'หน้า ' + currPage + ' / ' + totalPages;
+        if (prevBtn) prevBtn.disabled = (currPage <= 1);
+        if (nextBtn) nextBtn.disabled = (currPage >= totalPages);
+
+        if (total === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:40px; color:#94a3b8;"><i class="fas fa-folder-open" style="font-size:24px; margin-bottom:8px; display:block;"></i>ไม่พบข้อมูลนักเรียนตามเงื่อนไขตัวกรอง</td></tr>';
+            return;
+        }
+
+        const startIdx = (currPage - 1) * pageSize;
+        const endIdx = Math.min(startIdx + pageSize, total);
+        const pageItems = data.slice(startIdx, endIdx);
+
+        let rowsHtml = '';
+        pageItems.forEach((s, idx) => {
+            const seq = startIdx + idx + 1;
+            const isMissed = !s.status.includes('ครบ') && !s.status.includes('ปฏิเสธ');
+            const isRefused = s.status.includes('ปฏิเสธ');
+
+            let statusBadge = '';
+            if (isRefused) {
+                statusBadge = '<span style="background:#fef9c3; color:#a16207; padding:3px 8px; border-radius:12px; font-weight:600; font-size:11px; display:inline-flex; align-items:center; gap:4px;"><i class="fas fa-hand-paper"></i> ปฏิเสธ</span>';
+            } else if (isMissed) {
+                statusBadge = '<span style="background:#fee2e2; color:#dc2626; padding:3px 8px; border-radius:12px; font-weight:600; font-size:11px; display:inline-flex; align-items:center; gap:4px;"><i class="fas fa-times-circle"></i> ขาดวัคซีน</span>';
+            } else {
+                statusBadge = '<span style="background:#dcfce7; color:#16a34a; padding:3px 8px; border-radius:12px; font-weight:600; font-size:11px; display:inline-flex; align-items:center; gap:4px;"><i class="fas fa-check-circle"></i> ครบตามเกณฑ์</span>';
+            }
+
+            const missingText = s.missingVaccines ? '<span style="color:#dc2626; font-weight:600;">' + esc(s.missingVaccines) + '</span>' : '<span style="color:#10b981;">ครบทุกเข็ม</span>';
+
+            rowsHtml += `
+                <tr style="border-bottom:1px solid #f1f5f9; background:${idx % 2 === 0 ? '#ffffff' : '#f8fafc'}; transition:background 0.15s;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='${idx % 2 === 0 ? '#ffffff' : '#f8fafc'}';">
+                    <td style="padding:10px 8px; text-align:center; color:#64748b; font-weight:600;">${seq}</td>
+                    <td style="padding:10px 10px; font-family:'Consolas',monospace; font-size:12px;">
+                        <div style="font-weight:600; color:#0f172a;">${esc(s.cid || '-')}</div>
+                        <div style="color:#64748b; font-size:11px;">HN: ${esc(s.hn || '-')}</div>
+                    </td>
+                    <td style="padding:10px 10px; font-weight:600; color:#0f172a;">
+                        ${esc(s.fullname)}
+                    </td>
+                    <td style="padding:10px 8px; color:#475569;">
+                        <div>${esc(s.birthDate || '-')}</div>
+                        <div style="font-size:11px; color:#64748b;">${esc(s.age || '-')}</div>
+                    </td>
+                    <td style="padding:10px 10px; color:#0369a1; font-weight:600;">
+                        <i class="fas fa-school" style="margin-right:4px; font-size:11px;"></i> ${esc(s.school || '-')}
+                    </td>
+                    <td style="padding:10px 8px; text-align:center;">
+                        <span style="background:#f1f5f9; padding:2px 8px; border-radius:6px; font-weight:600; font-size:11px; color:#475569;">${esc(s.class || '-')}</span>
+                    </td>
+                    <td style="padding:10px 8px; color:#475569; font-size:11px;">
+                        ${esc(s.hname || s.hcode || '-')}
+                    </td>
+                    <td style="padding:10px 8px; text-align:center;">
+                        ${statusBadge}
+                    </td>
+                    <td style="padding:10px 8px; text-align:center; font-size:11px;">
+                        ${missingText}
+                    </td>
+                </tr>
+            `;
+        });
+
+        tbody.innerHTML = rowsHtml;
+    }
+
+    // ============================================================
+    // ส่งออก Excel ข้อมูลนักเรียน (Export Excel)
+    // ============================================================
+    function exportStudentVaccineExcel() {
+        if (!window.STUDENT_FILTERED_DATA || window.STUDENT_FILTERED_DATA.length === 0) {
+            Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลนักเรียนสำหรับส่งออก Excel ตามเงื่อนไขตัวกรอง', 'info');
+            return;
+        }
+
+        try {
+            showLoading('กำลังสร้างไฟล์ Excel ข้อมูลวัคซีนนักเรียน...');
+            const data = window.STUDENT_FILTERED_DATA;
+            const wb = XLSX.utils.book_new();
+            const today = new Date();
+            const dateStr = today.getDate() + '/' + (today.getMonth() + 1) + '/' + (today.getFullYear() + 543);
+
+            const rows = [
+                ['รายงานข้อมูลการรับวัคซีนของเด็กนักเรียน (ศูนย์พัฒนาเด็กเล็กและโรงเรียนประถม)'],
+                ['พื้นที่อำเภอเทพา จังหวัดสงขลา | ข้อมูลจากตาราง data_student'],
+                ['วันที่ออกรายงาน: ' + dateStr + ' | จำนวนนักเรียนทั้งหมด: ' + data.length + ' คน'],
+                [],
+                [
+                    '#', 'รหัสสถานพยาบาล', 'สถานพยาบาล', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ - สกุล', 'วันเกิด', 'อายุ',
+                    'โรงเรียน / ศพด.', 'ชั้นเรียน', 'สถานะประเมิน', 'วัคซีนที่ขาด',
+                    'BCG', 'HBV1', 'DTP-HB-Hib1', 'Rota1', 'IPV1', 'DTP-HB-Hib2', 'Rota2', 'IPV2',
+                    'DTP-HB-Hib3', 'OPV3', 'Rota3', 'MMR1', 'LJE1', 'DTP4', 'OPV4', 'MMR2', 'LJE2', 'DTP5', 'OPV5',
+                    'PCV1', 'PCV2', 'PCV3'
+                ]
+            ];
+
+            data.forEach((s, idx) => {
+                rows.push([
+                    idx + 1,
+                    s.hcode || '',
+                    s.hname || '',
+                    s.cid || '',
+                    s.hn || '',
+                    s.fullname || '',
+                    s.birthDate || '',
+                    s.age || '',
+                    s.school || '',
+                    s.class || '',
+                    s.status || '',
+                    s.missingVaccines || '',
+                    s.bcg || '',
+                    s.hbv1 || '',
+                    s.dtp1 || '',
+                    s.rota1 || '',
+                    s.ipv1 || '',
+                    s.dtp2 || '',
+                    s.rota2 || '',
+                    s.ipv2 || '',
+                    s.dtp3 || '',
+                    s.opv3 || '',
+                    s.rota3 || '',
+                    s.mmr1 || '',
+                    s.lje1 || '',
+                    s.dtp4 || '',
+                    s.opv4 || '',
+                    s.mmr2 || '',
+                    s.lje2 || '',
+                    s.dtp5 || '',
+                    s.opv5 || '',
+                    s.pcv1 || '',
+                    s.pcv2 || '',
+                    s.pcv3 || ''
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            XLSX.utils.book_append_sheet(wb, ws, 'รายชื่อนักเรียน');
+            XLSX.writeFile(wb, 'รายงานวัคซีนนักเรียน_อ_เทพา_' + today.toISOString().slice(0, 10) + '.xlsx');
+            hideLoading();
+            Swal.fire('สำเร็จ', 'ส่งออกไฟล์ Excel ข้อมูลวัคซีนนักเรียนเรียบร้อยแล้ว (' + data.length + ' คน)', 'success');
+        } catch (err) {
+            console.error('exportStudentVaccineExcel error:', err);
+            hideLoading();
+            Swal.fire('ผิดพลาด', 'ไม่สามารถส่งออกไฟล์ Excel ได้: ' + err.message, 'error');
+        }
+    }
+    window.exportStudentVaccineExcel = exportStudentVaccineExcel;
+
+    // ส่งออกแยกรายโรงเรียน
+    async function exportStudentBySchoolExcel() {
+        if (!window.STUDENT_RAW_DATA || window.STUDENT_RAW_DATA.length === 0) {
+            Swal.fire('แจ้งเตือน', 'กรุณากดปุ่ม "ประมวลผลข้อมูล" ก่อนทำการส่งออก', 'info');
+            return;
+        }
+
+        const allStudents = window.STUDENT_RAW_DATA;
+        const schoolGroups = new Map();
+        const unassigned = [];
+
+        allStudents.forEach(s => {
+            const sch = String(s.school || '').trim();
+            if (sch && sch !== '-' && sch !== '0') {
+                if (!schoolGroups.has(sch)) schoolGroups.set(sch, []);
+                schoolGroups.get(sch).push(s);
+            } else {
+                unassigned.push(s);
+            }
+        });
+
+        const schoolNames = Array.from(schoolGroups.keys()).sort((a, b) => a.localeCompare(b, 'th'));
+
+        let optsHtml = '<option value="ALL">📑 ส่งออกทุกโรงเรียน (รวมทุกโรงเรียน)</option>';
+        optsHtml += '<option value="ALL_SHEETS">📑 ส่งออกทุกโรงเรียน (แยก Sheet ละ 1 โรงเรียน)</option>';
+        schoolNames.forEach(s => {
+            const count = schoolGroups.get(s).length;
+            optsHtml += '<option value="' + esc(s) + '">🏫 ' + esc(s) + ' (' + count + ' คน)</option>';
+        });
+        if (unassigned.length > 0) {
+            optsHtml += '<option value="__UNASSIGNED__">⚠️ ยังไม่ระบุโรงเรียน (' + unassigned.length + ' คน)</option>';
+        }
+
+        const { value: selectedChoice } = await Swal.fire({
+            title: '🏫 ส่งออกรายชื่อนักเรียนแยกรายโรงเรียน',
+            html: `
+                <div style="text-align:left; font-size:13px; color:#475569; margin-bottom:12px;">
+                    เลือกโรงเรียนที่ต้องการส่งออกข้อมูลวัคซีน เพื่อนำส่งให้ครูประจำชั้นหรือผู้บริหารโรงเรียนติดตาม:
+                </div>
+                <select id="swalExportSchoolSelect" style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid #cbd5e1; font-family:'Kanit',sans-serif; font-size:14px;">
+                    ${optsHtml}
+                </select>
+            `,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '<i class="fas fa-file-download"></i> ส่งออก Excel',
+            cancelButtonText: 'ยกเลิก',
+            confirmButtonColor: '#3b82f6',
+            cancelButtonColor: '#64748b',
+            preConfirm: () => {
+                const el = document.getElementById('swalExportSchoolSelect');
+                return el ? el.value : 'ALL';
+            }
+        });
+
+        if (!selectedChoice) return;
+
+        showLoading('กำลังสร้างไฟล์ Excel ข้อมูลนักเรียนตามโรงเรียน...');
+        try {
+            const wb = XLSX.utils.book_new();
+            const today = new Date();
+            const dateStr = today.getDate() + '/' + (today.getMonth() + 1) + '/' + (today.getFullYear() + 543);
+
+            const makeHeaderRows = (schName, studentCount) => [
+                ['รายงานข้อมูลการรับวัคซีนของเด็กนักเรียน (Student Vaccine Coverage)'],
+                ['โรงเรียน/ศพด.: ' + schName + ' | อำเภอเทพา จังหวัดสงขลา'],
+                ['วันที่ออกรายงาน: ' + dateStr + ' | จำนวนนักเรียน: ' + studentCount + ' คน'],
+                [],
+                [
+                    '#', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ - สกุล', 'วันเกิด', 'อายุ', 'ชั้นเรียน',
+                    'สถานะประเมินวัคซีน', 'วัคซีนที่ขาด (ต้องติดตาม)',
+                    'BCG', 'HBV1', 'DTP1', 'Rota1', 'IPV1', 'DTP2', 'Rota2', 'IPV2',
+                    'DTP3', 'OPV3', 'Rota3', 'MMR1', 'LJE1', 'DTP4', 'OPV4', 'MMR2', 'LJE2', 'DTP5', 'OPV5',
+                    'PCV1', 'PCV2', 'PCV3', 'สถานพยาบาล'
+                ]
+            ];
+
+            const formatStudentRow = (s, idx) => [
+                idx + 1,
+                s.cid || '',
+                s.hn || '',
+                s.fullname || '',
+                s.birthDate || '',
+                s.age || '',
+                s.class || '',
+                s.status || '',
+                s.missingVaccines || '',
+                s.bcg || '', s.hbv1 || '', s.dtp1 || '', s.rota1 || '', s.ipv1 || '',
+                s.dtp2 || '', s.rota2 || '', s.ipv2 || '', s.dtp3 || '', s.opv3 || '',
+                s.rota3 || '', s.mmr1 || '', s.lje1 || '', s.dtp4 || '', s.opv4 || '',
+                s.mmr2 || '', s.lje2 || '', s.dtp5 || '', s.opv5 || '',
+                s.pcv1 || '', s.pcv2 || '', s.pcv3 || '',
+                s.hname || s.hcode || ''
+            ];
+
+            if (selectedChoice === 'ALL_SHEETS') {
+                schoolNames.forEach(sch => {
+                    const list = schoolGroups.get(sch) || [];
+                    const rows = makeHeaderRows(sch, list.length);
+                    list.forEach((s, idx) => rows.push(formatStudentRow(s, idx)));
+                    const ws = XLSX.utils.aoa_to_sheet(rows);
+                    const sheetName = sch.replace(/[:\\\/?*\[\]]/g, '').slice(0, 30);
+                    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+                });
+                XLSX.writeFile(wb, 'รายงานวัคซีนนักเรียน_แยกรายโรงเรียน_' + today.toISOString().slice(0, 10) + '.xlsx');
+            } else if (selectedChoice === 'ALL') {
+                const rows = makeHeaderRows('ทุกโรงเรียน/ศพด.', allStudents.length);
+                allStudents.forEach((s, idx) => rows.push(formatStudentRow(s, idx)));
+                const ws = XLSX.utils.aoa_to_sheet(rows);
+                XLSX.utils.book_append_sheet(wb, ws, 'นักเรียนทั้งหมด');
+                XLSX.writeFile(wb, 'รายงานวัคซีนนักเรียน_ทุกโรงเรียน_' + today.toISOString().slice(0, 10) + '.xlsx');
+            } else {
+                const targetList = (selectedChoice === '__UNASSIGNED__') ? unassigned : (schoolGroups.get(selectedChoice) || []);
+                const titleName = (selectedChoice === '__UNASSIGNED__') ? 'ยังไม่ระบุโรงเรียน' : selectedChoice;
+                const rows = makeHeaderRows(titleName, targetList.length);
+                targetList.forEach((s, idx) => rows.push(formatStudentRow(s, idx)));
+                const ws = XLSX.utils.aoa_to_sheet(rows);
+                const safeName = titleName.replace(/[:\\\/?*\[\]]/g, '').slice(0, 30);
+                XLSX.utils.book_append_sheet(wb, ws, safeName);
+                XLSX.writeFile(wb, 'รายงานวัคซีนนักเรียน_' + safeName + '_' + today.toISOString().slice(0, 10) + '.xlsx');
+            }
+
+            hideLoading();
+            Swal.fire('สำเร็จ', 'ส่งออกไฟล์ Excel เรียบร้อยแล้ว', 'success');
+        } catch (err) {
+            console.error('exportStudentBySchoolExcel error:', err);
+            hideLoading();
+            Swal.fire('ผิดพลาด', 'ไม่สามารถส่งออกไฟล์ Excel ได้: ' + err.message, 'error');
+        }
+    }
+    window.exportStudentBySchoolExcel = exportStudentBySchoolExcel;
+
+
+    // ============================================================
     // ระบบแจ้งเตือนผลการติดตามแผนเร่งรัดและเฝ้าระวังวัคซีนคอตีบเข้า TELEGRAM
     // สรุปผลรายสถานพยาบาล + ข้อสั่งการ สสอ.เทพา (ข้อความ + ภาพ Infographic)
     // ส่งทุกวันเวลา 09:00 น. อัตโนมัติ + ส่งด้วยตนเอง
@@ -27873,8 +28761,8 @@ window.exportDtpBySchoolExcel = async function() {
     function checkDailyDtpTelegramAlertAuto() {
         try {
             const today = new Date();
-            // ตรวจสอบว่าถึงเวลา 09:00 น. หรือยัง
-            if (today.getHours() < 9) return;
+            // ตรวจสอบว่าถึงเวลา 09:00 น. หรือยัง (ส่งเฉพาะช่วงเวลา 09:00 - 09:59 น. เท่านั้น)
+            if (today.getHours() !== 9) return;
 
             const todayYmd = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
             const lastSent = localStorage.getItem('vcc_last_dtp_tg_sent_date');
