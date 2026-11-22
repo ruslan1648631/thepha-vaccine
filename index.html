@@ -30027,43 +30027,88 @@ window.exportDtpBySchoolExcel = async function() {
     let _ftSelectedChild = null;
 
     window.doFastTrackSearch = async function() {
-        const moo = document.getElementById('ft_moo').value;
-        const q   = document.getElementById('ft_search').value.trim();
+        const moo = document.getElementById('ft_moo') ? document.getElementById('ft_moo').value.trim() : '';
+        const q   = document.getElementById('ft_search') ? document.getElementById('ft_search').value.trim() : '';
         const el  = document.getElementById('ft_searchResult');
-        if (!q && !moo) return;
-        el.innerHTML = '<div style="color:#6b7280; font-size:13px; padding:8px 0;"><i class="fas fa-spinner fa-spin"></i> กำลังค้นหา...</div>';
+        if (!q && !moo) {
+            return Swal.fire('แจ้งเตือน', 'กรุณาเลือกหมู่บ้านหรือพิมพ์ชื่อเด็กเพื่อค้นหา', 'warning');
+        }
+        el.innerHTML = '<div style="color:#6b7280; font-size:13px; padding:10px 0;"><i class="fas fa-spinner fa-spin"></i> กำลังค้นหาข้อมูล...</div>';
+        
         try {
-            let query = supabaseClient.from('data').select('*').limit(20);
-            if (moo) query = query.eq('moo', moo);
-            if (q) query = query.or(`fullname.ilike.%${q}%,CID.ilike.%${q}%,HN.ilike.%${q}%`);
-            const { data, error } = await query;
-            if (error) throw error;
-            if (!data || !data.length) { el.innerHTML = '<div style="color:#dc2626; padding:8px; font-size:13px;">ไม่พบข้อมูลเด็กที่ค้นหา</div>'; return; }
-            el.innerHTML = data.map((c, i) => `
+            let results = [];
+            if (q) {
+                // ค้นหาผ่าน searchChild เพื่อรองรับทั้งชื่อ-สกุล, CID, HN อย่างแม่นยำ ไม่ติดข้อจำกัดประเภทข้อมูล bigint
+                const sRes = await callGAS('searchChild', [q]);
+                results = (sRes && sRes.success) ? (sRes.children || []) : [];
+                if (moo && results.length > 0) {
+                    results = results.filter(c => {
+                        const vName = String(c.villageName || c.villname || c.village || '').trim();
+                        const vMoo  = String(c.village || c.moo || '').trim();
+                        return vName.includes(moo) || moo.includes(vName) || vMoo === moo;
+                    });
+                }
+            } else if (moo) {
+                // กรณีเลือกเฉพาะหมู่บ้าน ดึงรายชื่อเด็กในหมู่บ้านนั้น
+                const allData = await fetchAllFromTable('data');
+                results = (allData || []).filter(c => {
+                    const vName = String(c.villname || c.villageName || c.village || '').trim();
+                    const vMoo  = String(c.moo || c.village || '').trim();
+                    return vName.includes(moo) || moo.includes(vName) || vMoo === moo;
+                });
+            }
+
+            if (!results || !results.length) {
+                el.innerHTML = '<div style="color:#dc2626; padding:10px; font-size:13px; background:#fef2f2; border-radius:8px; border:1px solid #fee2e2;"><i class="fas fa-exclamation-circle"></i> ไม่พบข้อมูลเด็กตามเงื่อนไขที่ค้นหา</div>';
+                return;
+            }
+
+            el._results = results;
+            el.innerHTML = results.slice(0, 30).map((c, i) => {
+                const name = c.fullname || c.childName || '-';
+                const age  = c.age || calcAge(c.birthDate || c.DOB);
+                const vill = c.villageName || c.villname || (c.village ? 'หมู่ ' + c.village : '') || (c.moo ? 'หมู่ ' + c.moo : '-');
+                const hn   = c.hn || c.HN || '-';
+                return `
                 <div onclick="selectFastChild(${i})" data-idx="${i}"
-                  style="padding:10px 12px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:6px; cursor:pointer; transition:background 0.2s;"
-                  onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#f8fafc'">
-                  <div style="font-weight:700; font-size:14px; color:#0f172a;">${esc(c.fullname || '-')}</div>
-                  <div style="font-size:12px; color:#64748b;">อายุ: ${calcAge(c.DOB)} | หมู่ ${esc(c.moo||'-')} | HN: ${esc(c.HN||'-')}</div>
-                </div>`).join('');
-            // เก็บ data ไว้ใน closure
-            el._results = data;
+                  style="padding:10px 12px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:6px; cursor:pointer; transition:all 0.2s;"
+                  onmouseover="this.style.background='#e0f2fe'; this.style.borderColor='#bae6fd';" 
+                  onmouseout="this.style.background='#f8fafc'; this.style.borderColor='#e2e8f0';">
+                  <div style="font-weight:700; font-size:14px; color:#0f172a;">👶 ${esc(name)}</div>
+                  <div style="font-size:12px; color:#64748b; margin-top:2px;">
+                    อายุ: <b>${age}</b> &nbsp;|&nbsp; ${esc(vill)} &nbsp;|&nbsp; HN: ${esc(hn)}
+                  </div>
+                </div>`;
+            }).join('');
         } catch(err) {
-            el.innerHTML = `<div style="color:#dc2626; font-size:13px;">ผิดพลาด: ${esc(err.message)}</div>`;
+            console.error('doFastTrackSearch error:', err);
+            el.innerHTML = `<div style="color:#dc2626; font-size:13px; padding:8px;">ผิดพลาด: ${esc(err.message)}</div>`;
         }
     };
 
     window.selectFastChild = function(idx) {
         const el = document.getElementById('ft_searchResult');
-        const c  = el._results[idx];
+        const c  = el && el._results ? el._results[idx] : null;
         if (!c) return;
         _ftSelectedChild = c;
         document.getElementById('ft_recordCard').style.display = 'block';
+        
+        const name = c.fullname || c.childName || '-';
+        const dob  = c.birthDate || c.DOB || '-';
+        const age  = c.age || calcAge(c.birthDate || c.DOB);
+        const vill = c.villageName || c.villname || (c.village ? 'หมู่ ' + c.village : '') || (c.moo ? 'หมู่ ' + c.moo : '-');
+        const hno  = c.houseNumber || c.house_no || c.house || '-';
+        const cid  = c.cid || c.CID || c.id || '-';
+        const hn   = c.hn || c.HN || '-';
+
         document.getElementById('ft_childInfo').innerHTML = `
-            <b style="font-size:15px;">👶 ${esc(c.fullname||'-')}</b><br>
-            วันเกิด: ${esc(c.DOB||'-')} &nbsp;|&nbsp; อายุ: ${calcAge(c.DOB)}
-            &nbsp;|&nbsp; หมู่ ${esc(c.moo||'-')} ${esc(c.villname||'')}
-            <br>เลขบัตร: ${esc(c.CID||'-')} &nbsp;|&nbsp; HN: ${esc(c.HN||'-')}`;
+            <div style="font-size:15px; font-weight:700; color:#0369a1; margin-bottom:4px;">👶 ${esc(name)}</div>
+            <div style="font-size:13px; color:#334155; line-height:1.7;">
+                <b>วันเกิด:</b> ${esc(dob)} &nbsp;|&nbsp; <b>อายุ:</b> ${age}<br>
+                <b>หมู่บ้าน:</b> ${esc(vill)} &nbsp;|&nbsp; <b>บ้านเลขที่:</b> ${esc(hno)}<br>
+                <b>เลขบัตร ปชช.:</b> ${esc(cid)} &nbsp;|&nbsp; <b>HN:</b> ${esc(hn)}
+            </div>`;
+
         // reset สถานะ
         document.querySelectorAll('.ft-status-btn').forEach(b => { b.style.boxShadow = ''; b.style.transform = ''; });
         document.getElementById('ft_selectedStatus').value = '';
@@ -30077,20 +30122,23 @@ window.exportDtpBySchoolExcel = async function() {
         btn.style.transform = 'scale(1.04)';
         const status = btn.dataset.status;
         document.getElementById('ft_selectedStatus').value = status;
+        
         // แสดงฟิลด์เพิ่มเติมตามสถานะ
         const extra = document.getElementById('ft_extraFields');
         if (status === 'นัดมา รพ.สต.') {
             extra.style.display = 'block';
-            extra.innerHTML = `<label style="font-size:13px; color:#374151; display:block; margin-bottom:4px;">วันที่นัด</label>
+            extra.innerHTML = `<label style="font-size:13px; color:#374151; display:block; margin-bottom:4px; font-weight:600;"><i class="fas fa-calendar-day"></i> วันที่นัดมา รพ.สต.</label>
                 <input type="date" id="ft_appointDate" style="width:100%; padding:9px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; box-sizing:border-box;"
                     min="${new Date().toISOString().split('T')[0]}">`;
         } else if (status === 'ย้ายที่อยู่') {
             extra.style.display = 'block';
-            extra.innerHTML = `<input type="text" id="ft_newAddr" placeholder="ย้ายไปอยู่ที่ไหน (ถ้าทราบ) เช่น ต.X อ.Y จ.Z"
+            extra.innerHTML = `<label style="font-size:13px; color:#374151; display:block; margin-bottom:4px; font-weight:600;"><i class="fas fa-map-marker-alt"></i> ย้ายไปอยู่ที่ไหน</label>
+                <input type="text" id="ft_newAddr" placeholder="เช่น ย้ายไป อ.หาดใหญ่ จ.สงขลา (ถ้าทราบ)"
                 style="width:100%; padding:9px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; box-sizing:border-box;">`;
         } else if (status === 'ปฏิเสธวัคซีน') {
             extra.style.display = 'block';
-            extra.innerHTML = `<input type="text" id="ft_refuseReason" placeholder="สาเหตุที่ปฏิเสธ (ถ้าทราบ)"
+            extra.innerHTML = `<label style="font-size:13px; color:#374151; display:block; margin-bottom:4px; font-weight:600;"><i class="fas fa-comment-dots"></i> สาเหตุที่ปฏิเสธ</label>
+                <input type="text" id="ft_refuseReason" placeholder="เช่น ผู้ปกครองกังวลผลข้างเคียง, ติดธุระต่างจังหวัด"
                 style="width:100%; padding:9px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; box-sizing:border-box;">`;
         } else {
             extra.style.display = 'none';
@@ -30100,10 +30148,10 @@ window.exportDtpBySchoolExcel = async function() {
     window.submitFastTrack = async function() {
         if (!_ftSelectedChild) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกเด็กก่อน', 'warning');
         const status = document.getElementById('ft_selectedStatus').value;
-        if (!status) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกผลการติดตาม', 'warning');
+        if (!status) return Swal.fire('แจ้งเตือน', 'กรุณาแตะเลือกผลการติดตามอย่างน้อย 1 รายการ', 'warning');
 
         const c = _ftSelectedChild;
-        const vhvName = document.getElementById('ft_vhvName').value.trim() || (APP.currentUser.fullname || APP.currentUser.name || '-');
+        const vhvName = document.getElementById('ft_vhvName').value.trim() || (APP.currentUser.fullname || APP.currentUser.name || 'อสม.');
         let remark = document.getElementById('ft_remark').value.trim();
 
         // รวม extra fields เข้า remark
@@ -30118,27 +30166,35 @@ window.exportDtpBySchoolExcel = async function() {
             if (d && d.value) remark = (remark ? remark + ' | ' : '') + 'สาเหตุ: ' + d.value;
         }
 
+        const childIdVal = Number(String(c.cid || c.CID || c.id || 0).replace(/\D/g, '')) || 0;
+        const childNameVal = c.fullname || c.childName || '-';
+        const villVal = String(c.villageName || c.villname || c.village || c.moo || '-').trim();
+
         const record = {
-            CID:       c.CID || '',
-            HN:        c.HN  || '',
-            fullname:  c.fullname || '',
-            moo:       c.moo || '',
-            hcode:     c.hcode || APP.currentUser.hcode || '',
+            ChildId:   childIdVal,
+            ChildName: childNameVal,
+            Village:   villVal,
+            Vaccine:   'FOLLOWUP',
             Status:    status,
-            Remarks:   remark,
-            VHV:       vhvName,
-            TrackDate: new Date().toISOString().split('T')[0],
-            CreatedAt: new Date().toISOString(),
-            Source:    'VHV_FastTrack_Mobile',
+            VisitDate: new Date().toISOString().slice(0, 10),
+            Remarks:   remark || '-',
+            Reporter:  vhvName,
+            Timestamp: new Date().toISOString()
         };
 
+        showLoading('กำลังบันทึกข้อมูล...');
         try {
             const { error } = await supabaseClient.from('VCC_tracking').insert([record]);
+            hideLoading();
             if (error) throw error;
 
-            await Swal.fire({ icon: 'success', title: '✅ บันทึกสำเร็จ',
-                html: `<b>${esc(c.fullname)}</b><br>สถานะ: <b>${esc(status)}</b><br>โดย อสม. ${esc(vhvName)}`,
-                timer: 2500, showConfirmButton: false });
+            await Swal.fire({ 
+                icon: 'success', 
+                title: '✅ บันทึกสำเร็จ',
+                html: `<b>${esc(childNameVal)}</b><br>สถานะ: <b style="color:#0284c7;">${esc(status)}</b><br>ผู้บันทึก: ${esc(vhvName)}`,
+                timer: 2500, 
+                showConfirmButton: false 
+            });
 
             // รีเซ็ต
             _ftSelectedChild = null;
@@ -30150,6 +30206,8 @@ window.exportDtpBySchoolExcel = async function() {
             document.getElementById('ft_selectedStatus').value = '';
             loadFastTrackTodayLog();
         } catch(err) {
+            hideLoading();
+            console.error('submitFastTrack error:', err);
             Swal.fire('ผิดพลาด', 'ไม่สามารถบันทึกได้: ' + err.message, 'error');
         }
     };
@@ -30158,24 +30216,50 @@ window.exportDtpBySchoolExcel = async function() {
         const el = document.getElementById('ft_todayLog');
         if (!el) return;
         try {
-            const today = new Date().toISOString().split('T')[0];
-            const hcode = APP.currentUser.hcode || '';
-            let q = supabaseClient.from('VCC_tracking').select('*')
-                .gte('TrackDate', today).order('CreatedAt', { ascending: false }).limit(30);
-            if (hcode) q = q.eq('hcode', hcode);
-            const { data, error } = await q;
+            const today = new Date().toISOString().slice(0, 10);
+            const { data, error } = await supabaseClient.from('VCC_tracking')
+                .select('ChildId, ChildName, Village, Status, Remarks, Reporter, VisitDate, Timestamp')
+                .order('Timestamp', { ascending: false })
+                .limit(20);
             if (error) throw error;
-            if (!data || !data.length) { el.innerHTML = '<div style="color:#9ca3af; font-size:13px; text-align:center; padding:12px;">ยังไม่มีการบันทึกวันนี้</div>'; return; }
-            const statusColors = { 'ฉีดแล้วที่อื่น': '#16a34a', 'นัดมา รพ.สต.': '#1d4ed8', 'ปฏิเสธวัคซีน': '#dc2626', 'ย้ายที่อยู่': '#92400e' };
-            el.innerHTML = data.map(r => `
+
+            // กรองของวันนี้ หรือแสดง 10 รายการล่าสุด
+            const todayData = (data || []).filter(r => (r.VisitDate === today || (r.Timestamp && r.Timestamp.startsWith(today))));
+            const displayData = todayData.length > 0 ? todayData : (data || []).slice(0, 10);
+
+            if (!displayData || !displayData.length) { 
+                el.innerHTML = '<div style="color:#9ca3af; font-size:13px; text-align:center; padding:12px;">ยังไม่มีการบันทึกวันนี้</div>'; 
+                return; 
+            }
+
+            const statusColors = { 
+                'ฉีดแล้วที่อื่น': '#16a34a', 
+                'นัดมา รพ.สต.': '#1d4ed8', 
+                'ปฏิเสธวัคซีน': '#dc2626', 
+                'ย้ายที่อยู่': '#92400e',
+                'ตามนัดปกติ': '#16a34a' 
+            };
+
+            const headerNotice = todayData.length > 0 ? '' : '<div style="color:#64748b; font-size:11px; margin-bottom:6px; font-style:italic;">(ประวัติล่าสุดในระบบ)</div>';
+
+            el.innerHTML = headerNotice + displayData.map(r => {
+                const stColor = statusColors[r.Status] || '#0284c7';
+                return `
                 <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #f1f5f9;">
-                    <span style="display:inline-block; background:${statusColors[r.Status] || '#6b7280'}22; color:${statusColors[r.Status] || '#6b7280'}; border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700; white-space:nowrap;">${esc(r.Status||'-')}</span>
+                    <span style="display:inline-block; background:${stColor}18; color:${stColor}; border:1px solid ${stColor}44; border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700; white-space:nowrap;">${esc(r.Status||'-')}</span>
                     <div style="flex:1; overflow:hidden;">
-                        <div style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.fullname||'-')}</div>
-                        <div style="font-size:11px; color:#9ca3af;">อสม. ${esc(r.VHV||'-')} ${r.Remarks ? '| ' + esc(r.Remarks.substring(0,40)) : ''}</div>
+                        <div style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.ChildName||'-')}</div>
+                        <div style="font-size:11px; color:#9ca3af;">
+                            ${r.Village && r.Village !== '-' ? esc(r.Village) + ' | ' : ''}อสม. ${esc(r.Reporter||'-')} 
+                            ${r.Remarks && r.Remarks !== '-' ? '| ' + esc(r.Remarks.substring(0,35)) : ''}
+                        </div>
                     </div>
-                </div>`).join('');
-        } catch(e) { el.innerHTML = '<div style="color:#dc2626; font-size:13px;">โหลดประวัติไม่สำเร็จ</div>'; }
+                </div>`;
+            }).join('');
+        } catch(e) { 
+            console.warn('loadFastTrackTodayLog error:', e);
+            el.innerHTML = '<div style="color:#9ca3af; font-size:13px; text-align:center; padding:12px;">ยังไม่มีประวัติการบันทึก</div>'; 
+        }
     }
 
     /* ============================================================
@@ -30184,30 +30268,50 @@ window.exportDtpBySchoolExcel = async function() {
     async function loadJhcisFeedbackPage() {
         const page = document.getElementById('jhcisFeedbackPage');
         page.classList.add('active');
-        showLoading();
+        showLoading('กำลังรวบรวมข้อมูล...');
 
         try {
-            const hcode = APP.currentUser.hcode || '';
-            // ดึงกลุ่มที่ต้องส่งคืน JHCIS จาก VCC_tracking
-            const statuses = ['ย้ายที่อยู่', 'ปฏิเสธวัคซีน'];
-            let q = supabaseClient.from('VCC_tracking').select('*')
-                .in('Status', statuses)
-                .order('TrackDate', { ascending: false });
-            if (hcode) q = q.eq('hcode', hcode);
-            const { data: trackRows, error: te } = await q;
+            // ดึงจาก VCC_tracking ที่มี Status หรือ Remarks บ่งชี้ว่าย้ายที่อยู่ หรือปฏิเสธวัคซีน
+            const { data: trackRows, error: te } = await supabaseClient.from('VCC_tracking')
+                .select('ChildId, ChildName, Village, Status, Remarks, Reporter, VisitDate, Timestamp')
+                .or('Status.ilike.%ย้าย%,Status.ilike.%ปฏิเสธ%,Remarks.ilike.%ย้าย%,Remarks.ilike.%ปฏิเสธ%')
+                .order('Timestamp', { ascending: false })
+                .limit(1000);
             if (te) throw te;
 
-            // ดึงข้อมูลเด็กเพิ่มเติม (CID → data table)
-            const cids = [...new Set((trackRows || []).map(r => r.CID).filter(Boolean))];
+            // ดึงข้อมูลเด็กจากตาราง data เพื่อเอา HN, DOB, ที่อยู่, เบอร์โทร
+            const cids = [...new Set((trackRows || []).map(r => r.ChildId).filter(id => id && id > 0))];
             let childMap = {};
             if (cids.length) {
-                const { data: childRows } = await supabaseClient.from('data').select('*').in('CID', cids.slice(0, 1000));
-                (childRows || []).forEach(c => { childMap[c.CID] = c; });
+                for (let i = 0; i < cids.length; i += 100) {
+                    const chunk = cids.slice(i, i + 100);
+                    const { data: cRows } = await supabaseClient.from('data').select('*').in('CID', chunk);
+                    (cRows || []).forEach(c => { 
+                        const k = String(c.CID).trim();
+                        childMap[k] = c; 
+                    });
+                }
             }
 
             hideLoading();
 
-            const rows = (trackRows || []).map(r => ({ ...r, _child: childMap[r.CID] || {} }));
+            const rows = (trackRows || []).map(r => {
+                const cidStr = String(r.ChildId || '').trim();
+                const child = childMap[cidStr] || {};
+                let st = r.Status;
+                if (String(r.Status).includes('ย้าย') || String(r.Remarks).includes('ย้าย')) st = 'ย้ายที่อยู่';
+                else if (String(r.Status).includes('ปฏิเสธ') || String(r.Remarks).includes('ปฏิเสธ')) st = 'ปฏิเสธวัคซีน';
+                return {
+                    ...r,
+                    Status: st,
+                    fullname: r.ChildName || child.fullname || '-',
+                    CID: cidStr,
+                    HN: child.HN || '-',
+                    VHV: r.Reporter || '-',
+                    TrackDate: r.VisitDate || (r.Timestamp ? r.Timestamp.slice(0, 10) : '-'),
+                    _child: child
+                };
+            });
 
             page.innerHTML = `
             <div class="page-title"><i class="fas fa-file-export"></i> ส่งออกรายชื่อย้าย/ปฏิเสธ → ปรับปรุงใน JHCIS</div>
@@ -30290,13 +30394,13 @@ window.exportDtpBySchoolExcel = async function() {
 
             </div>`;
 
-            // เก็บ data ใน closure
             page._rows = rows;
             window._fbRows = rows;
             renderFeedbackTable();
 
         } catch(err) {
             hideLoading();
+            console.error('loadJhcisFeedbackPage error:', err);
             page.innerHTML = `<div class="error-message">เกิดข้อผิดพลาด: ${esc(err.message)}</div>`;
         }
     }
@@ -30330,11 +30434,13 @@ window.exportDtpBySchoolExcel = async function() {
             const jhcisAction = r.Status === 'ย้ายที่อยู่'
                 ? '📋 จำหน่ายออก (Discharge)<br><span style="font-size:10px; color:#9ca3af;">เปลี่ยนสถานะ discharge=Y</span>'
                 : '✏️ บันทึกปฏิเสธ<br><span style="font-size:10px; color:#9ca3af;">เพิ่มในกลุ่มปฏิเสธวัคซีน</span>';
+            const ageStr = c.DOB ? calcAge(c.DOB) : '-';
+            const addrStr = `หมู่ ${esc(r.Village || c.moo || c.villname || '-')} ${esc(c.houseNumber ? 'บ้านเลขที่ '+c.houseNumber : '')} ${esc(c.tel ? '☎ '+c.tel : '')}`;
             return `<tr style="border-bottom:1px solid #f1f5f9;">
                 <td style="padding:8px 10px; color:#9ca3af;">${i+1}</td>
                 <td style="padding:8px 10px; font-weight:600; white-space:nowrap;">${esc(r.fullname || c.fullname || '-')}</td>
-                <td style="padding:8px 10px; white-space:nowrap;">${calcAge(r._child && r._child.DOB ? r._child.DOB : '')}</td>
-                <td style="padding:8px 10px; font-size:12px;">หมู่ ${esc(r.moo || c.moo || '-')} ${esc(c.villname || '')}<br>${esc(c.houseNumber ? 'บ้านเลขที่ '+c.houseNumber : '')} ${esc(c.tel ? '☎ '+c.tel : '')}</td>
+                <td style="padding:8px 10px; white-space:nowrap;">${ageStr}</td>
+                <td style="padding:8px 10px; font-size:12px;">${addrStr}</td>
                 <td style="padding:8px 10px; font-size:12px; white-space:nowrap;">${esc(r.CID || '-')}<br>HN: ${esc(r.HN || '-')}</td>
                 <td style="padding:8px 10px; text-align:center;">
                     <span style="display:inline-block; background:${st.bg}; color:${st.color}; border:1px solid ${st.border}; border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700; white-space:nowrap;">${esc(r.Status)}</span>
@@ -30359,17 +30465,32 @@ window.exportDtpBySchoolExcel = async function() {
         if (!filtered.length) return Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลที่จะส่งออก', 'warning');
 
         const sheetData = [
-            ['#', 'ชื่อ-สกุลเด็ก', 'วันเกิด', 'อายุ', 'เลขบัตร', 'HN', 'หมู่', 'บ้านเลขที่', 'โทรศัพท์', 'ประเภท', 'รายละเอียด', 'อสม.ผู้บันทึก', 'วันที่บันทึก', 'การดำเนินการ JHCIS'],
+            ['#', 'ชื่อ-สกุลเด็ก', 'วันเกิด', 'อายุ', 'เลขบัตร', 'HN', 'หมู่บ้าน', 'บ้านเลขที่', 'โทรศัพท์', 'ประเภท', 'รายละเอียด', 'อสม.ผู้บันทึก', 'วันที่บันทึก', 'การดำเนินการ JHCIS'],
             ...filtered.map((r, i) => {
                 const c = r._child || {};
                 const jhcisAct = r.Status === 'ย้ายที่อยู่' ? 'จำหน่ายออก (discharge=Y)' : 'บันทึกกลุ่มปฏิเสธวัคซีน';
-                return [i+1, r.fullname || c.fullname || '', c.DOB || '', calcAge(c.DOB), r.CID || '', r.HN || '', r.moo || c.moo || '', c.houseNumber || '', c.tel || '', r.Status || '', r.Remarks || '', r.VHV || '', r.TrackDate || '', jhcisAct];
+                return [
+                    i+1, 
+                    r.fullname || c.fullname || '', 
+                    c.DOB || '', 
+                    c.DOB ? calcAge(c.DOB) : '', 
+                    r.CID || '', 
+                    r.HN || '', 
+                    r.Village || c.moo || c.villname || '', 
+                    c.houseNumber || '', 
+                    c.tel || '', 
+                    r.Status || '', 
+                    r.Remarks || '', 
+                    r.VHV || '', 
+                    r.TrackDate || '', 
+                    jhcisAct
+                ];
             })
         ];
         try {
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.aoa_to_sheet(sheetData);
-            ws['!cols'] = [5,25,12,8,16,10,8,12,14,12,25,18,12,25].map(w => ({ wch: w }));
+            ws['!cols'] = [5,25,12,8,16,10,14,12,14,12,25,18,12,25].map(w => ({ wch: w }));
             XLSX.utils.book_append_sheet(wb, ws, 'JHCIS_Feedback');
             const fname = `JHCIS_Feedback_${new Date().toISOString().slice(0,10)}.xlsx`;
             XLSX.writeFile(wb, fname);
