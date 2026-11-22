@@ -6424,7 +6424,8 @@
                         }
                     }
                 }
-                const vacName = (vacCode ? vacCode : (foundVacName || ''));
+                // ดึงชื่อวัคซีนจากฟิลด์ vaccinename ของตาราง appoint เป็นอันดับแรก
+                const vacName = foundVacName || (vacCode && typeof lookupThaiVaccineName === 'function' ? lookupThaiVaccineName(vacCode) : '') || vacCode;
                 const isoAppt  = rawAppt ? String(rawAppt).slice(0, 10) : '';
 
                 if (apptMap.has(primaryKey)) {
@@ -6447,7 +6448,7 @@
 
             const appointments = Array.from(apptMap.values()).map(item => {
                 item[10] = item._vacCodes.length > 0 ? item._vacCodes.join(', ') : '-';
-                item[11] = item._vacNames.length > 0 ? item._vacNames.join(', ') : item[10];
+                item[11] = item._vacNames.length > 0 ? item._vacNames.join(', ') : (item[10] !== '-' ? item[10] : '-');
                 delete item._vacCodes;
                 delete item._vacNames;
                 return item;
@@ -16466,8 +16467,17 @@ function updateBottomNavActive(page) {
                         const displayName = getFacilityDisplayName(cell);
                         trHtml += '<td><span style="color:#0284c7; font-weight:500;">' + esc(displayName) + '</span></td>';
                     } else if (idx === vacColIdx && cell) {
-                        const vacTags = cell.toString().split(',').map(function(v) {
-                            return '<span class="status-badge" style="background:#e3f2fd; color:#0284c7; margin-right:4px; margin-bottom:2px; display:inline-block; border: 1px solid #bae6fd;">' + esc(v.trim()) + '</span>';
+                        const nameColIdx = findColumnIndex(headers, ['ชื่อวัคซีน', 'vaccinename', 'vaccine_name'], 11);
+                        const nameCell = (nameColIdx !== -1 && row[nameColIdx] && row[nameColIdx] !== '-') ? String(row[nameColIdx]) : '';
+                        const nameList = nameCell ? nameCell.split(',').map(s => s.trim()).filter(Boolean) : [];
+                        const codeList = cell.toString().split(',').map(function(v) { return v.trim(); }).filter(Boolean);
+
+                        const vacTags = codeList.map(function(v, vIdx) {
+                            const vName = (nameList[vIdx] && nameList[vIdx] !== '-' && nameList[vIdx].toLowerCase() !== v.toLowerCase()) 
+                                ? nameList[vIdx] 
+                                : ((typeof lookupThaiVaccineName === 'function') ? lookupThaiVaccineName(v) : v);
+                            const tagText = (vName && vName.toLowerCase() !== v.toLowerCase()) ? `${vName} (${v})` : v;
+                            return '<span class="status-badge" style="background:#e3f2fd; color:#0284c7; margin-right:4px; margin-bottom:2px; display:inline-block; border: 1px solid #bae6fd;" title="' + esc(vName || v) + '">' + esc(tagText) + '</span>';
                         }).join('');
                         trHtml += '<td>' + vacTags + '</td>';
                     } else if (headers[idx] && (headers[idx].toString().includes('โทร') || headers[idx].toString().toLowerCase().includes('phone')) && cell && cell !== '-') {
@@ -16791,8 +16801,8 @@ function updateBottomNavActive(page) {
             village: getVal(['หมู่ที่', 'หมู่', 'village']),
             phone: getVal(['โทรศัพท์', 'เบอร์โทร', 'phone', 'tel']),
             apptDate: rawDate,
-            vacCode: getVal(['รหัสวัคซีน', 'วัคซีน', 'vaccine']),
-            vacName: getVal(['ชื่อวัคซีน'], ''),
+            vacCode: getVal(['รหัสวัคซีน', 'วัคซีน', 'vaccine', 'vaccinecode']),
+            vacName: getVal(['ชื่อวัคซีน', 'vaccinename', 'vaccine_name'], ''),
             cid: getVal(['CID', 'เลขบัตร', 'ID', 'id']),
             apptStatus: row._apptStatus || '',
             isMissed: isMissed,
@@ -16811,17 +16821,34 @@ function updateBottomNavActive(page) {
 
         // แยกรายการวัคซีน
         const vacCodes = slipData.vacCode ? String(slipData.vacCode).split(',').map(v => v.trim()).filter(Boolean) : [];
+        const vacNames = slipData.vacName ? String(slipData.vacName).split(',').map(v => v.trim()).filter(Boolean) : [];
         let vacItemsHtml = '';
         if (vacCodes.length > 0) {
-            vacItemsHtml = vacCodes.map(code => {
-                const thaiName = lookupThaiVaccineName(code);
+            vacItemsHtml = vacCodes.map((code, idx) => {
+                // ดึงชื่อวัคซีนจากฟิลด์ vaccinename ของตาราง appoint เป็นอันดับแรก
+                let thaiName = (vacNames[idx] && vacNames[idx] !== '-' && vacNames[idx].toLowerCase() !== code.toLowerCase()) 
+                    ? vacNames[idx] 
+                    : '';
+                if (!thaiName) {
+                    thaiName = (typeof lookupThaiVaccineName === 'function') ? lookupThaiVaccineName(code) : '';
+                }
+                if (!thaiName || thaiName.toLowerCase() === code.toLowerCase()) {
+                    if (vacNames[idx] && vacNames[idx] !== '-') thaiName = vacNames[idx];
+                }
                 return `
                     <div class="mini-slip-vac-item">
                         <span class="mini-slip-vac-code">${esc(code)}</span>
-                        <span class="mini-slip-vac-name">${esc(thaiName)}</span>
+                        <span class="mini-slip-vac-name">${esc(thaiName || code)}</span>
                     </div>
                 `;
             }).join('');
+        } else if (vacNames.length > 0) {
+            vacItemsHtml = vacNames.map(name => `
+                <div class="mini-slip-vac-item">
+                    <span class="mini-slip-vac-code"><i class="fas fa-syringe"></i></span>
+                    <span class="mini-slip-vac-name">${esc(name)}</span>
+                </div>
+            `).join('');
         } else {
             vacItemsHtml = `<div class="mini-slip-vac-item"><span class="mini-slip-vac-name" style="color:#64748b;">(ตามที่เจ้าหน้าที่ระบุในสมุดสีชมพู)</span></div>`;
         }
