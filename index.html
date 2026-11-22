@@ -5103,6 +5103,8 @@
                 <div id="dtpReportPage" class="page"></div>
                 <div id="studentVaccinePage" class="page"></div>
                 <div id="vaccineStockPage" class="page"></div>
+                <div id="vhvFastTrackPage" class="page"></div>
+                <div id="jhcisFeedbackPage" class="page"></div>
             </div>
         </div>
     </div>
@@ -12571,7 +12573,10 @@ async function warmUpBackend() {
                 { id: 'officerTracking', icon: 'fas fa-clipboard-list', label: 'ติดตามวัคซีน' },
                 { id: 'report', icon: 'fas fa-file-medical-alt', label: 'รายงานการติดตาม' },
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
-                { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' }
+                { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
+                { sep: 'Field Operations' },
+                { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'อสม. บันทึกผลติดตาม', badge: 'มือถือ' },
+                { id: 'jhcisFeedback', icon: 'fas fa-file-export', label: 'ส่งออกย้าย/ปฏิเสธ → JHCIS' }
             ];
         } else if (role === 'เจ้าหน้าที่') {
             items = [
@@ -12589,7 +12594,10 @@ async function warmUpBackend() {
                 { id: 'officerTracking', icon: 'fas fa-clipboard-list', label: 'ติดตามวัคซีน' },
                 { id: 'report', icon: 'fas fa-file-medical-alt', label: 'รายงานการติดตาม' },
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
-                { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' }
+                { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
+                { sep: 'Field Operations' },
+                { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'อสม. บันทึกผลติดตาม', badge: 'มือถือ' },
+                { id: 'jhcisFeedback', icon: 'fas fa-file-export', label: 'ส่งออกย้าย/ปฏิเสธ → JHCIS' }
             ];
         } else {
             items = [
@@ -12601,13 +12609,14 @@ async function warmUpBackend() {
                 { id: 'vaccineStock', icon: 'fas fa-boxes', label: 'คลังวัคชีน' },
                 { id: 'districtChildSearch', icon: 'fas fa-search-location', label: 'ค้นหาเด็กในอำเภอ', badge: 'ค้นข้ามเขต' },
                 { id: 'trackingForm', icon: 'fas fa-plus-circle', label: 'รายงานการติดตาม' },
-                { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' }
+                { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' },
+                { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'บันทึกผลติดตาม (Fast)', badge: 'มือถือ' }
             ];
         }
 
         document.getElementById('sidebarMenu').innerHTML = items.map(function(item) {
             if (item.sep) return '<div class="menu-section">' + item.sep + '</div>';
-            var badgeColor = item.badge === 'ค้นข้ามเขต' ? '#0284c7' : '#dc2626';
+            var badgeColor = item.badge === 'ค้นข้ามเขต' ? '#0284c7' : item.badge === 'มือถือ' ? '#16a34a' : '#dc2626';
             var badgeHtml = item.badge ? '<span class="badge" style="margin-left:auto;background:' + badgeColor + ';color:#fff;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.3px;box-shadow:0 1px 3px rgba(2,132,199,0.3);">' + item.badge + '</span>' : '';
             return '<div class="menu-item ' + (APP.currentPage === item.id ? 'active' : '') + '" data-page="' +
                 item.id + '"><i class="' + item.icon + '"></i><span>' + item.label + '</span>' + badgeHtml + '</div>';
@@ -12764,6 +12773,8 @@ const PAGE_TITLES = {
     studentVaccine: 'ข้อมูลและประวัติวัคซีนนักเรียนในสถานศึกษา (โรงเรียน/ศพด.)',
     pcvTarget: 'รายงานกลุ่มเป้าหมายวัคซีน PCV (เด็กเกิดตั้งแต่ 1 ต.ค. 2568)',
     vaccineStock: 'คลังวัคชีนและเวชภัณฑ์ (Stock)',
+    vhvFastTrack: 'อสม. บันทึกผลติดตามวัคซีน (Mobile Fast-Track)',
+    jhcisFeedback: 'ส่งออกรายชื่อย้ายที่อยู่/ปฏิเสธ เพื่อปรับปรุงใน JHCIS',
 };
 function navigateTo(page) {
     // ✅ ปิด Bottom Sheet ถ้าเปิดอยู่
@@ -12829,6 +12840,14 @@ function navigateTo(page) {
         case 'districtChildSearch':
             document.getElementById('districtChildSearchPage').classList.add('active');
             loadDistrictChildSearchPage();
+            break;
+        case 'vhvFastTrack':
+            document.getElementById('vhvFastTrackPage').classList.add('active');
+            loadVhvFastTrackPage();
+            break;
+        case 'jhcisFeedback':
+            document.getElementById('jhcisFeedbackPage').classList.add('active');
+            loadJhcisFeedbackPage();
             break;
         default: loadDashboard(); break;
     }
@@ -29856,6 +29875,512 @@ window.exportDtpBySchoolExcel = async function() {
     setTimeout(checkDailyDtpTelegramAlertAuto, 4000);
 
     console.log('✅ ระบบติดตามวัคซีนเด็ก 0-5 ปี พร้อมทำงาน');
+
+    /* ============================================================
+       VHV FAST-TRACK: อสม. บันทึกผลติดตามแบบรวดเร็วบนมือถือ
+       ============================================================ */
+    async function loadVhvFastTrackPage() {
+        const page = document.getElementById('vhvFastTrackPage');
+        page.classList.add('active');
+        showLoading();
+
+        try {
+            // ดึงรายชื่อหมู่บ้าน
+            const vRes = await callGAS('getVillages', []);
+            const villages = (vRes.success ? vRes.villages : []).map(v => v.name || v);
+
+            // ดึง hcode จาก user
+            const userHcode = APP.currentUser.hcode || APP.currentUser.facility || '';
+            const userVillage = APP.currentUser.village || '';
+            const isVHV = !isAdminAmpurUser() && !isAdminHOSUser() && APP.currentUser.role !== 'เจ้าหน้าที่';
+
+            // ค่าเริ่มต้น URL param (เปิดจากลิงก์เฉพาะหมู่บ้าน)
+            const urlParams = new URLSearchParams(window.location.search);
+            const presetMoo = urlParams.get('moo') || userVillage;
+            const presetHcode = urlParams.get('hcode') || userHcode;
+
+            hideLoading();
+
+            const villageOpts = villages.map(v =>
+                `<option value="${esc(v)}" ${v === presetMoo ? 'selected' : ''}>${esc(v)}</option>`
+            ).join('');
+
+            page.innerHTML = `
+            <div class="page-title"><i class="fas fa-mobile-alt"></i> อสม. บันทึกผลติดตามวัคซีน</div>
+            <div style="max-width:520px; margin:0 auto; padding:0 8px 80px;">
+
+              <!-- SHARE LINK BOX (เจ้าหน้าที่เท่านั้น) -->
+              ${!isVHV ? `
+              <div class="section-card" style="background:#f0fdf4; border:1px solid #bbf7d0; margin-bottom:16px;">
+                <h4 style="color:#16a34a; margin-bottom:8px;"><i class="fas fa-share-alt"></i> ลิงก์เปิดบนมือถือ อสม.</h4>
+                <p style="font-size:13px; color:#374151; margin-bottom:10px;">คัดลอกลิงก์ส่งให้ อสม. แต่ละหมู่บ้าน — เปิดแล้วล็อกอินด้วยบัญชี อสม. ได้เลย</p>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  <select id="linkMooSelect" style="flex:1; min-width:160px; padding:8px; border-radius:8px; border:1px solid #d1d5db;">
+                    <option value="">-- เลือกหมู่บ้าน --</option>
+                    ${villageOpts}
+                  </select>
+                  <button onclick="copyVhvLink()" style="background:#16a34a; color:#fff; border:none; padding:9px 16px; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; white-space:nowrap;">
+                    <i class="fas fa-copy"></i> คัดลอกลิงก์
+                  </button>
+                </div>
+                <div id="vhvLinkDisplay" style="margin-top:8px; font-size:12px; color:#6b7280; word-break:break-all;"></div>
+              </div>` : ''}
+
+              <!-- STEP 1: ค้นหาเด็ก -->
+              <div class="section-card">
+                <h4 style="margin-bottom:12px;"><i class="fas fa-search" style="color:#0284c7;"></i> ค้นหาเด็กที่ต้องติดตาม</h4>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                  <select id="ft_moo" style="flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;" ${isVHV ? 'disabled style="background:#f1f5f9; flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;"' : ''}>
+                    <option value="">-- หมู่บ้าน --</option>
+                    ${villageOpts}
+                  </select>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <input id="ft_search" type="text" placeholder="ชื่อ-สกุล / เลขบัตร / HN"
+                    style="flex:1; padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;">
+                  <button onclick="doFastTrackSearch()" style="background:#0284c7; color:#fff; border:none; padding:10px 16px; border-radius:8px; cursor:pointer; font-size:14px;">
+                    <i class="fas fa-search"></i>
+                  </button>
+                </div>
+                <div id="ft_searchResult" style="margin-top:12px;"></div>
+              </div>
+
+              <!-- STEP 2: บันทึกผล (ซ่อนจนกว่าจะเลือกเด็ก) -->
+              <div id="ft_recordCard" style="display:none;">
+                <div class="section-card" style="border:2px solid #0284c7;">
+                  <div id="ft_childInfo" style="background:#f0f9ff; border-radius:8px; padding:12px; margin-bottom:14px; font-size:14px; line-height:1.8;"></div>
+
+                  <!-- ปุ่มสถานะ Fast-Tap -->
+                  <h4 style="margin-bottom:10px; font-size:14px; color:#374151;"><i class="fas fa-hand-pointer" style="color:#f59e0b;"></i> เลือกผลการติดตาม</h4>
+                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+                    <button class="ft-status-btn" data-status="ฉีดแล้วที่อื่น"
+                      onclick="selectFastStatus(this)"
+                      style="padding:14px 8px; border-radius:10px; border:2px solid #d1fae5; background:#f0fdf4; color:#15803d; font-size:14px; font-weight:700; cursor:pointer; transition:all 0.2s;">
+                      <i class="fas fa-check-circle" style="display:block; font-size:22px; margin-bottom:4px;"></i>
+                      ฉีดแล้วที่อื่น
+                    </button>
+                    <button class="ft-status-btn" data-status="นัดมา รพ.สต."
+                      onclick="selectFastStatus(this)"
+                      style="padding:14px 8px; border-radius:10px; border:2px solid #bfdbfe; background:#eff6ff; color:#1d4ed8; font-size:14px; font-weight:700; cursor:pointer; transition:all 0.2s;">
+                      <i class="fas fa-calendar-plus" style="display:block; font-size:22px; margin-bottom:4px;"></i>
+                      นัดมา รพ.สต.
+                    </button>
+                    <button class="ft-status-btn" data-status="ปฏิเสธวัคซีน"
+                      onclick="selectFastStatus(this)"
+                      style="padding:14px 8px; border-radius:10px; border:2px solid #fee2e2; background:#fef2f2; color:#dc2626; font-size:14px; font-weight:700; cursor:pointer; transition:all 0.2s;">
+                      <i class="fas fa-times-circle" style="display:block; font-size:22px; margin-bottom:4px;"></i>
+                      ปฏิเสธวัคซีน
+                    </button>
+                    <button class="ft-status-btn" data-status="ย้ายที่อยู่"
+                      onclick="selectFastStatus(this)"
+                      style="padding:14px 8px; border-radius:10px; border:2px solid #fde68a; background:#fffbeb; color:#92400e; font-size:14px; font-weight:700; cursor:pointer; transition:all 0.2s;">
+                      <i class="fas fa-truck-moving" style="display:block; font-size:22px; margin-bottom:4px;"></i>
+                      ย้ายที่อยู่
+                    </button>
+                  </div>
+                  <input type="hidden" id="ft_selectedStatus">
+
+                  <!-- รายละเอียดเพิ่มเติมตามสถานะ -->
+                  <div id="ft_extraFields" style="display:none; margin-bottom:12px;"></div>
+
+                  <input type="text" id="ft_vhvName" placeholder="ชื่อ อสม. ผู้บันทึก (ไม่บังคับ)"
+                    value="${esc(APP.currentUser.fullname || APP.currentUser.name || '')}"
+                    style="width:100%; padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; margin-bottom:10px; box-sizing:border-box;">
+                  <textarea id="ft_remark" rows="2" placeholder="หมายเหตุเพิ่มเติม (ไม่บังคับ)"
+                    style="width:100%; padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; resize:vertical; box-sizing:border-box;"></textarea>
+
+                  <button onclick="submitFastTrack()"
+                    style="width:100%; margin-top:12px; background:linear-gradient(135deg,#0284c7,#0369a1); color:#fff; border:none; padding:14px; border-radius:10px; font-size:16px; font-weight:700; cursor:pointer; box-shadow:0 2px 8px rgba(2,132,199,0.4);">
+                    <i class="fas fa-paper-plane"></i> บันทึกผลการติดตาม
+                  </button>
+                </div>
+              </div>
+
+              <!-- ประวัติที่บันทึกวันนี้ -->
+              <div class="section-card" style="margin-top:0;">
+                <h4 style="margin-bottom:10px; font-size:14px;"><i class="fas fa-history" style="color:#7c3aed;"></i> บันทึกของวันนี้</h4>
+                <div id="ft_todayLog" style="font-size:13px; color:#6b7280;">กำลังโหลด...</div>
+              </div>
+
+            </div>`;
+
+            // โหลดประวัติวันนี้
+            loadFastTrackTodayLog();
+
+        } catch(err) {
+            hideLoading();
+            page.innerHTML = `<div class="error-message">เกิดข้อผิดพลาด: ${esc(err.message)}</div>`;
+        }
+    }
+
+    window.copyVhvLink = function() {
+        const moo = document.getElementById('linkMooSelect').value;
+        if (!moo) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกหมู่บ้านก่อน', 'warning');
+        const base = window.location.href.split('?')[0].split('#')[0];
+        const link = `${base}?moo=${encodeURIComponent(moo)}#vhvFastTrack`;
+        navigator.clipboard.writeText(link).then(() => {
+            document.getElementById('vhvLinkDisplay').textContent = '✅ คัดลอกแล้ว: ' + link;
+            Swal.fire({ icon: 'success', title: 'คัดลอกลิงก์แล้ว', text: `ลิงก์สำหรับ ${moo}`, timer: 2000, showConfirmButton: false });
+        });
+    };
+
+    let _ftSelectedChild = null;
+
+    window.doFastTrackSearch = async function() {
+        const moo = document.getElementById('ft_moo').value;
+        const q   = document.getElementById('ft_search').value.trim();
+        const el  = document.getElementById('ft_searchResult');
+        if (!q && !moo) return;
+        el.innerHTML = '<div style="color:#6b7280; font-size:13px; padding:8px 0;"><i class="fas fa-spinner fa-spin"></i> กำลังค้นหา...</div>';
+        try {
+            let query = supabaseClient.from('data').select('*').limit(20);
+            if (moo) query = query.eq('moo', moo);
+            if (q) query = query.or(`fullname.ilike.%${q}%,CID.ilike.%${q}%,HN.ilike.%${q}%`);
+            const { data, error } = await query;
+            if (error) throw error;
+            if (!data || !data.length) { el.innerHTML = '<div style="color:#dc2626; padding:8px; font-size:13px;">ไม่พบข้อมูลเด็กที่ค้นหา</div>'; return; }
+            el.innerHTML = data.map((c, i) => `
+                <div onclick="selectFastChild(${i})" data-idx="${i}"
+                  style="padding:10px 12px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:6px; cursor:pointer; transition:background 0.2s;"
+                  onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#f8fafc'">
+                  <div style="font-weight:700; font-size:14px; color:#0f172a;">${esc(c.fullname || '-')}</div>
+                  <div style="font-size:12px; color:#64748b;">อายุ: ${calcAge(c.DOB)} | หมู่ ${esc(c.moo||'-')} | HN: ${esc(c.HN||'-')}</div>
+                </div>`).join('');
+            // เก็บ data ไว้ใน closure
+            el._results = data;
+        } catch(err) {
+            el.innerHTML = `<div style="color:#dc2626; font-size:13px;">ผิดพลาด: ${esc(err.message)}</div>`;
+        }
+    };
+
+    window.selectFastChild = function(idx) {
+        const el = document.getElementById('ft_searchResult');
+        const c  = el._results[idx];
+        if (!c) return;
+        _ftSelectedChild = c;
+        document.getElementById('ft_recordCard').style.display = 'block';
+        document.getElementById('ft_childInfo').innerHTML = `
+            <b style="font-size:15px;">👶 ${esc(c.fullname||'-')}</b><br>
+            วันเกิด: ${esc(c.DOB||'-')} &nbsp;|&nbsp; อายุ: ${calcAge(c.DOB)}
+            &nbsp;|&nbsp; หมู่ ${esc(c.moo||'-')} ${esc(c.villname||'')}
+            <br>เลขบัตร: ${esc(c.CID||'-')} &nbsp;|&nbsp; HN: ${esc(c.HN||'-')}`;
+        // reset สถานะ
+        document.querySelectorAll('.ft-status-btn').forEach(b => { b.style.boxShadow = ''; b.style.transform = ''; });
+        document.getElementById('ft_selectedStatus').value = '';
+        document.getElementById('ft_extraFields').style.display = 'none';
+        document.getElementById('ft_recordCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    window.selectFastStatus = function(btn) {
+        document.querySelectorAll('.ft-status-btn').forEach(b => { b.style.boxShadow = ''; b.style.transform = 'scale(1)'; });
+        btn.style.boxShadow = '0 0 0 3px #0284c7';
+        btn.style.transform = 'scale(1.04)';
+        const status = btn.dataset.status;
+        document.getElementById('ft_selectedStatus').value = status;
+        // แสดงฟิลด์เพิ่มเติมตามสถานะ
+        const extra = document.getElementById('ft_extraFields');
+        if (status === 'นัดมา รพ.สต.') {
+            extra.style.display = 'block';
+            extra.innerHTML = `<label style="font-size:13px; color:#374151; display:block; margin-bottom:4px;">วันที่นัด</label>
+                <input type="date" id="ft_appointDate" style="width:100%; padding:9px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; box-sizing:border-box;"
+                    min="${new Date().toISOString().split('T')[0]}">`;
+        } else if (status === 'ย้ายที่อยู่') {
+            extra.style.display = 'block';
+            extra.innerHTML = `<input type="text" id="ft_newAddr" placeholder="ย้ายไปอยู่ที่ไหน (ถ้าทราบ) เช่น ต.X อ.Y จ.Z"
+                style="width:100%; padding:9px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; box-sizing:border-box;">`;
+        } else if (status === 'ปฏิเสธวัคซีน') {
+            extra.style.display = 'block';
+            extra.innerHTML = `<input type="text" id="ft_refuseReason" placeholder="สาเหตุที่ปฏิเสธ (ถ้าทราบ)"
+                style="width:100%; padding:9px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; box-sizing:border-box;">`;
+        } else {
+            extra.style.display = 'none';
+        }
+    };
+
+    window.submitFastTrack = async function() {
+        if (!_ftSelectedChild) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกเด็กก่อน', 'warning');
+        const status = document.getElementById('ft_selectedStatus').value;
+        if (!status) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกผลการติดตาม', 'warning');
+
+        const c = _ftSelectedChild;
+        const vhvName = document.getElementById('ft_vhvName').value.trim() || (APP.currentUser.fullname || APP.currentUser.name || '-');
+        let remark = document.getElementById('ft_remark').value.trim();
+
+        // รวม extra fields เข้า remark
+        if (status === 'นัดมา รพ.สต.') {
+            const d = document.getElementById('ft_appointDate');
+            if (d && d.value) remark = (remark ? remark + ' | ' : '') + 'นัดวันที่ ' + d.value;
+        } else if (status === 'ย้ายที่อยู่') {
+            const d = document.getElementById('ft_newAddr');
+            if (d && d.value) remark = (remark ? remark + ' | ' : '') + 'ย้ายไป: ' + d.value;
+        } else if (status === 'ปฏิเสธวัคซีน') {
+            const d = document.getElementById('ft_refuseReason');
+            if (d && d.value) remark = (remark ? remark + ' | ' : '') + 'สาเหตุ: ' + d.value;
+        }
+
+        const record = {
+            CID:       c.CID || '',
+            HN:        c.HN  || '',
+            fullname:  c.fullname || '',
+            moo:       c.moo || '',
+            hcode:     c.hcode || APP.currentUser.hcode || '',
+            Status:    status,
+            Remarks:   remark,
+            VHV:       vhvName,
+            TrackDate: new Date().toISOString().split('T')[0],
+            CreatedAt: new Date().toISOString(),
+            Source:    'VHV_FastTrack_Mobile',
+        };
+
+        try {
+            const { error } = await supabaseClient.from('VCC_tracking').insert([record]);
+            if (error) throw error;
+
+            await Swal.fire({ icon: 'success', title: '✅ บันทึกสำเร็จ',
+                html: `<b>${esc(c.fullname)}</b><br>สถานะ: <b>${esc(status)}</b><br>โดย อสม. ${esc(vhvName)}`,
+                timer: 2500, showConfirmButton: false });
+
+            // รีเซ็ต
+            _ftSelectedChild = null;
+            document.getElementById('ft_recordCard').style.display = 'none';
+            document.getElementById('ft_searchResult').innerHTML = '';
+            document.getElementById('ft_search').value = '';
+            document.getElementById('ft_remark').value = '';
+            document.querySelectorAll('.ft-status-btn').forEach(b => { b.style.boxShadow = ''; b.style.transform = ''; });
+            document.getElementById('ft_selectedStatus').value = '';
+            loadFastTrackTodayLog();
+        } catch(err) {
+            Swal.fire('ผิดพลาด', 'ไม่สามารถบันทึกได้: ' + err.message, 'error');
+        }
+    };
+
+    async function loadFastTrackTodayLog() {
+        const el = document.getElementById('ft_todayLog');
+        if (!el) return;
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const hcode = APP.currentUser.hcode || '';
+            let q = supabaseClient.from('VCC_tracking').select('*')
+                .gte('TrackDate', today).order('CreatedAt', { ascending: false }).limit(30);
+            if (hcode) q = q.eq('hcode', hcode);
+            const { data, error } = await q;
+            if (error) throw error;
+            if (!data || !data.length) { el.innerHTML = '<div style="color:#9ca3af; font-size:13px; text-align:center; padding:12px;">ยังไม่มีการบันทึกวันนี้</div>'; return; }
+            const statusColors = { 'ฉีดแล้วที่อื่น': '#16a34a', 'นัดมา รพ.สต.': '#1d4ed8', 'ปฏิเสธวัคซีน': '#dc2626', 'ย้ายที่อยู่': '#92400e' };
+            el.innerHTML = data.map(r => `
+                <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #f1f5f9;">
+                    <span style="display:inline-block; background:${statusColors[r.Status] || '#6b7280'}22; color:${statusColors[r.Status] || '#6b7280'}; border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700; white-space:nowrap;">${esc(r.Status||'-')}</span>
+                    <div style="flex:1; overflow:hidden;">
+                        <div style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.fullname||'-')}</div>
+                        <div style="font-size:11px; color:#9ca3af;">อสม. ${esc(r.VHV||'-')} ${r.Remarks ? '| ' + esc(r.Remarks.substring(0,40)) : ''}</div>
+                    </div>
+                </div>`).join('');
+        } catch(e) { el.innerHTML = '<div style="color:#dc2626; font-size:13px;">โหลดประวัติไม่สำเร็จ</div>'; }
+    }
+
+    /* ============================================================
+       JHCIS FEEDBACK: ส่งออกรายชื่อย้ายที่อยู่/ปฏิเสธ → JHCIS
+       ============================================================ */
+    async function loadJhcisFeedbackPage() {
+        const page = document.getElementById('jhcisFeedbackPage');
+        page.classList.add('active');
+        showLoading();
+
+        try {
+            const hcode = APP.currentUser.hcode || '';
+            // ดึงกลุ่มที่ต้องส่งคืน JHCIS จาก VCC_tracking
+            const statuses = ['ย้ายที่อยู่', 'ปฏิเสธวัคซีน'];
+            let q = supabaseClient.from('VCC_tracking').select('*')
+                .in('Status', statuses)
+                .order('TrackDate', { ascending: false });
+            if (hcode) q = q.eq('hcode', hcode);
+            const { data: trackRows, error: te } = await q;
+            if (te) throw te;
+
+            // ดึงข้อมูลเด็กเพิ่มเติม (CID → data table)
+            const cids = [...new Set((trackRows || []).map(r => r.CID).filter(Boolean))];
+            let childMap = {};
+            if (cids.length) {
+                const { data: childRows } = await supabaseClient.from('data').select('*').in('CID', cids.slice(0, 1000));
+                (childRows || []).forEach(c => { childMap[c.CID] = c; });
+            }
+
+            hideLoading();
+
+            const rows = (trackRows || []).map(r => ({ ...r, _child: childMap[r.CID] || {} }));
+
+            page.innerHTML = `
+            <div class="page-title"><i class="fas fa-file-export"></i> ส่งออกรายชื่อย้าย/ปฏิเสธ → ปรับปรุงใน JHCIS</div>
+            <div style="max-width:900px; margin:0 auto; padding:0 8px 60px;">
+
+              <!-- คำอธิบาย -->
+              <div class="section-card" style="background:#fffbeb; border:1px solid #fde68a;">
+                <h4 style="color:#92400e; margin-bottom:8px;"><i class="fas fa-info-circle"></i> วัตถุประสงค์</h4>
+                <ul style="font-size:13px; color:#374151; margin:0; padding-left:18px; line-height:1.9;">
+                  <li>รวบรวมรายชื่อเด็ก <b>ย้ายที่อยู่ออกนอกพื้นที่</b> หรือ <b>ปฏิเสธวัคซีน</b> ที่ อสม./เจ้าหน้าที่บันทึกจากการลงพื้นที่</li>
+                  <li>ส่งออกเป็น <b>Excel</b> เพื่อให้เวชระเบียน <b>จำหน่าย / เปลี่ยน Type</b> ใน JHCIS</li>
+                  <li>เป้าหมายความครอบคลุมวัคซีนจะได้ไม่ถูกดึงให้ลดลงโดยไม่จำเป็น</li>
+                </ul>
+              </div>
+
+              <!-- Filter -->
+              <div class="section-card">
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                  <div>
+                    <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">ประเภท</label>
+                    <select id="fb_statusFilter" onchange="renderFeedbackTable()" style="padding:8px 12px; border-radius:8px; border:1px solid #d1d5db; font-size:13px;">
+                      <option value="">ทั้งหมด</option>
+                      <option value="ย้ายที่อยู่">ย้ายที่อยู่</option>
+                      <option value="ปฏิเสธวัคซีน">ปฏิเสธวัคซีน</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">ตั้งแต่วันที่</label>
+                    <input type="date" id="fb_dateFrom" onchange="renderFeedbackTable()" style="padding:8px; border-radius:8px; border:1px solid #d1d5db; font-size:13px;">
+                  </div>
+                  <div style="margin-left:auto; display:flex; gap:8px;">
+                    <button onclick="exportFeedbackExcel()"
+                      style="background:#16a34a; color:#fff; border:none; padding:9px 16px; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600;">
+                      <i class="fas fa-file-excel"></i> Export Excel
+                    </button>
+                    <button onclick="exportFeedbackPdf()"
+                      style="background:#0284c7; color:#fff; border:none; padding:9px 16px; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600;">
+                      <i class="fas fa-print"></i> พิมพ์รายงาน
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Summary Pills -->
+              <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+                <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:10px 18px; text-align:center; min-width:130px;">
+                  <div style="font-size:22px; font-weight:800; color:#92400e;" id="fb_countMove">0</div>
+                  <div style="font-size:11px; color:#78350f;">ย้ายที่อยู่</div>
+                </div>
+                <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:10px 18px; text-align:center; min-width:130px;">
+                  <div style="font-size:22px; font-weight:800; color:#dc2626;" id="fb_countRefuse">0</div>
+                  <div style="font-size:11px; color:#991b1b;">ปฏิเสธวัคซีน</div>
+                </div>
+                <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px; padding:10px 18px; text-align:center; min-width:130px;">
+                  <div style="font-size:22px; font-weight:800; color:#0284c7;" id="fb_countTotal">0</div>
+                  <div style="font-size:11px; color:#0369a1;">รวมทั้งหมด</div>
+                </div>
+              </div>
+
+              <!-- Table -->
+              <div class="section-card" style="overflow-x:auto; padding:8px;">
+                <table id="fb_table" style="width:100%; border-collapse:collapse; font-size:13px;">
+                  <thead>
+                    <tr style="background:#f1f5f9; color:#374151;">
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">#</th>
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">ชื่อ-สกุล เด็ก</th>
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">อายุ</th>
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">ที่อยู่</th>
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">เลขบัตร / HN</th>
+                      <th style="padding:8px 10px; text-align:center; white-space:nowrap;">ประเภท</th>
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">รายละเอียด</th>
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">อสม. ผู้บันทึก</th>
+                      <th style="padding:8px 10px; text-align:left; white-space:nowrap;">วันที่บันทึก</th>
+                      <th style="padding:8px 10px; text-align:center; white-space:nowrap;">การดำเนินการ JHCIS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fb_tbody"></tbody>
+                </table>
+              </div>
+
+            </div>`;
+
+            // เก็บ data ใน closure
+            page._rows = rows;
+            window._fbRows = rows;
+            renderFeedbackTable();
+
+        } catch(err) {
+            hideLoading();
+            page.innerHTML = `<div class="error-message">เกิดข้อผิดพลาด: ${esc(err.message)}</div>`;
+        }
+    }
+
+    window.renderFeedbackTable = function() {
+        const rows = window._fbRows || [];
+        const statusF = document.getElementById('fb_statusFilter') ? document.getElementById('fb_statusFilter').value : '';
+        const dateF   = document.getElementById('fb_dateFrom')     ? document.getElementById('fb_dateFrom').value     : '';
+
+        const filtered = rows.filter(r => {
+            if (statusF && r.Status !== statusF) return false;
+            if (dateF   && (r.TrackDate || '') < dateF) return false;
+            return true;
+        });
+
+        const countMove   = filtered.filter(r => r.Status === 'ย้ายที่อยู่').length;
+        const countRefuse = filtered.filter(r => r.Status === 'ปฏิเสธวัคซีน').length;
+        if (document.getElementById('fb_countMove'))   document.getElementById('fb_countMove').textContent   = countMove;
+        if (document.getElementById('fb_countRefuse')) document.getElementById('fb_countRefuse').textContent = countRefuse;
+        if (document.getElementById('fb_countTotal'))  document.getElementById('fb_countTotal').textContent  = filtered.length;
+
+        const statusStyles = {
+            'ย้ายที่อยู่':   { bg: '#fffbeb', color: '#92400e', border: '#fde68a' },
+            'ปฏิเสธวัคซีน': { bg: '#fef2f2', color: '#dc2626', border: '#fecaca' },
+        };
+        const tbody = document.getElementById('fb_tbody');
+        if (!tbody) return;
+        tbody.innerHTML = filtered.map((r, i) => {
+            const c   = r._child || {};
+            const st  = statusStyles[r.Status] || { bg: '#f8fafc', color: '#374151', border: '#e2e8f0' };
+            const jhcisAction = r.Status === 'ย้ายที่อยู่'
+                ? '📋 จำหน่ายออก (Discharge)<br><span style="font-size:10px; color:#9ca3af;">เปลี่ยนสถานะ discharge=Y</span>'
+                : '✏️ บันทึกปฏิเสธ<br><span style="font-size:10px; color:#9ca3af;">เพิ่มในกลุ่มปฏิเสธวัคซีน</span>';
+            return `<tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:8px 10px; color:#9ca3af;">${i+1}</td>
+                <td style="padding:8px 10px; font-weight:600; white-space:nowrap;">${esc(r.fullname || c.fullname || '-')}</td>
+                <td style="padding:8px 10px; white-space:nowrap;">${calcAge(r._child && r._child.DOB ? r._child.DOB : '')}</td>
+                <td style="padding:8px 10px; font-size:12px;">หมู่ ${esc(r.moo || c.moo || '-')} ${esc(c.villname || '')}<br>${esc(c.houseNumber ? 'บ้านเลขที่ '+c.houseNumber : '')} ${esc(c.tel ? '☎ '+c.tel : '')}</td>
+                <td style="padding:8px 10px; font-size:12px; white-space:nowrap;">${esc(r.CID || '-')}<br>HN: ${esc(r.HN || '-')}</td>
+                <td style="padding:8px 10px; text-align:center;">
+                    <span style="display:inline-block; background:${st.bg}; color:${st.color}; border:1px solid ${st.border}; border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700; white-space:nowrap;">${esc(r.Status)}</span>
+                </td>
+                <td style="padding:8px 10px; font-size:12px; color:#374151; max-width:180px;">${esc(r.Remarks || '-')}</td>
+                <td style="padding:8px 10px; font-size:12px; white-space:nowrap;">${esc(r.VHV || '-')}</td>
+                <td style="padding:8px 10px; font-size:12px; white-space:nowrap;">${esc(r.TrackDate || '-')}</td>
+                <td style="padding:8px 10px; font-size:12px; color:#374151; text-align:center; line-height:1.6;">${jhcisAction}</td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="10" style="text-align:center; color:#9ca3af; padding:20px;">ไม่พบข้อมูล</td></tr>';
+    };
+
+    window.exportFeedbackExcel = function() {
+        const rows = window._fbRows || [];
+        const statusF = document.getElementById('fb_statusFilter') ? document.getElementById('fb_statusFilter').value : '';
+        const dateF   = document.getElementById('fb_dateFrom')     ? document.getElementById('fb_dateFrom').value     : '';
+        const filtered = rows.filter(r => {
+            if (statusF && r.Status !== statusF) return false;
+            if (dateF   && (r.TrackDate || '') < dateF) return false;
+            return true;
+        });
+        if (!filtered.length) return Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลที่จะส่งออก', 'warning');
+
+        const sheetData = [
+            ['#', 'ชื่อ-สกุลเด็ก', 'วันเกิด', 'อายุ', 'เลขบัตร', 'HN', 'หมู่', 'บ้านเลขที่', 'โทรศัพท์', 'ประเภท', 'รายละเอียด', 'อสม.ผู้บันทึก', 'วันที่บันทึก', 'การดำเนินการ JHCIS'],
+            ...filtered.map((r, i) => {
+                const c = r._child || {};
+                const jhcisAct = r.Status === 'ย้ายที่อยู่' ? 'จำหน่ายออก (discharge=Y)' : 'บันทึกกลุ่มปฏิเสธวัคซีน';
+                return [i+1, r.fullname || c.fullname || '', c.DOB || '', calcAge(c.DOB), r.CID || '', r.HN || '', r.moo || c.moo || '', c.houseNumber || '', c.tel || '', r.Status || '', r.Remarks || '', r.VHV || '', r.TrackDate || '', jhcisAct];
+            })
+        ];
+        try {
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(sheetData);
+            ws['!cols'] = [5,25,12,8,16,10,8,12,14,12,25,18,12,25].map(w => ({ wch: w }));
+            XLSX.utils.book_append_sheet(wb, ws, 'JHCIS_Feedback');
+            const fname = `JHCIS_Feedback_${new Date().toISOString().slice(0,10)}.xlsx`;
+            XLSX.writeFile(wb, fname);
+            Swal.fire({ icon: 'success', title: 'ส่งออก Excel สำเร็จ', text: fname, timer: 2500, showConfirmButton: false });
+        } catch(e) { Swal.fire('ผิดพลาด', 'ไม่สามารถ export ได้: ' + e.message, 'error'); }
+    };
+
+    window.exportFeedbackPdf = function() {
+        window.print();
+    };
+
 
     /* ============================================================
        PROGRESSIVE WEB APP (PWA) & SERVICE WORKER ENGINE
