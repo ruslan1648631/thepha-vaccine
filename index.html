@@ -8,6 +8,17 @@
     <meta http-equiv="Expires" content="0">
     <title>ระบบติดตามวัคซีนเด็ก 0-5 ปี อ.เทพา</title>
     
+    <!-- ===== PWA & MOBILE APP CAPABILITIES ===== -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0284c7">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="VCC เทพา">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    
     <!-- ===== FONTS & ICONS ===== -->
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -4846,7 +4857,11 @@
             </div>
         </div>
         
-        <div class="public-actions">
+        <div class="public-actions" style="display:flex; align-items:center; gap:8px;">
+            <button id="publicPwaInstallBtn" class="btn-public-install" onclick="triggerPwaInstall()" style="display:none; background:#e0f2fe; color:#0284c7; border:1px solid #bae6fd; padding:8px 14px; border-radius:10px; font-size:13px; font-weight:600; cursor:pointer; align-items:center; gap:6px;">
+                <i class="fas fa-download"></i>
+                <span>ติดตั้งแอป VCC</span>
+            </button>
             <button class="btn-public-login" onclick="showLoginModal()">
                 <i class="fas fa-lock"></i>
                 <span>เข้าสู่ระบบ</span>
@@ -5043,7 +5058,10 @@
                     <div class="top-bar-title" id="topBarTitle">Dashboard</div>
                 </div>
                 <div class="user-info">
-                  <button class="action-btn" title="เปลี่ยนสีธีม" onclick="openThemePicker()" style="color: #64748b; font-size: 18px; margin-right: 10px;">
+                    <button id="pwaInstallBtn" class="action-btn" title="ติดตั้งแอป VCC ลงเครื่อง" onclick="triggerPwaInstall()" style="display:none; color:#0284c7; background:#e0f2fe; font-size:12px; font-weight:600; padding:5px 12px; border-radius:8px; border:1px solid #bae6fd; cursor:pointer; align-items:center; gap:6px; margin-right:8px; transition:all 0.2s ease;">
+                        <i class="fas fa-download"></i> <span>ติดตั้งแอป</span>
+                    </button>
+                    <button class="action-btn" title="เปลี่ยนสีธีม" onclick="openThemePicker()" style="color: #64748b; font-size: 18px; margin-right: 10px;">
                         <i class="fas fa-palette"></i>
                     </button>
                     <div class="user-avatar" id="userAvatar">U</div>
@@ -29838,6 +29856,205 @@ window.exportDtpBySchoolExcel = async function() {
     setTimeout(checkDailyDtpTelegramAlertAuto, 4000);
 
     console.log('✅ ระบบติดตามวัคซีนเด็ก 0-5 ปี พร้อมทำงาน');
+
+    /* ============================================================
+       PROGRESSIVE WEB APP (PWA) & SERVICE WORKER ENGINE
+       ============================================================ */
+    let deferredPwaPrompt = null;
+    let newSwWorker = null;
+
+    // A. จัดการ Event การติดตั้งแอป (PWA Install Prompt)
+    window.addEventListener('beforeinstallprompt', (e) => {
+        // ป้องกันไม่ให้เบราว์เซอร์แสดง default prompt อัตโนมัติ
+        e.preventDefault();
+        deferredPwaPrompt = e;
+
+        // แสดงปุ่มติดตั้งแอปทั้งในหน้า Dashboard สาธารณะ และ Topbar ของผู้ใช้
+        const topbarBtn = document.getElementById('pwaInstallBtn');
+        const publicBtn = document.getElementById('publicPwaInstallBtn');
+        if (topbarBtn) topbarBtn.style.display = 'inline-flex';
+        if (publicBtn) publicBtn.style.display = 'inline-flex';
+
+        console.log('💡 PWA Install prompt พร้อมใช้งาน');
+    });
+
+    // B. ฟังก์ชันกดเพื่อติดตั้งแอป VCC
+    window.triggerPwaInstall = async function() {
+        if (deferredPwaPrompt) {
+            // แสดง Prompt ให้ผู้ใช้กดยืนยันติดตั้ง
+            deferredPwaPrompt.prompt();
+            const { outcome } = await deferredPwaPrompt.userChoice;
+            console.log(`PWA install choice: ${outcome}`);
+            if (outcome === 'accepted') {
+                const topbarBtn = document.getElementById('pwaInstallBtn');
+                const publicBtn = document.getElementById('publicPwaInstallBtn');
+                if (topbarBtn) topbarBtn.style.display = 'none';
+                if (publicBtn) publicBtn.style.display = 'none';
+            }
+            deferredPwaPrompt = null;
+        } else {
+            // กรณีเปิดในแอปอยู่แล้ว หรือเบราว์เซอร์เช่น iOS Safari
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+            if (isStandalone) {
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'เปิดใช้งานในแอปแล้ว',
+                        text: 'ท่านกำลังใช้งาน VCC ผ่าน Progressive Web App อยู่แล้ว',
+                        confirmButtonText: 'ตกลง',
+                        confirmButtonColor: '#0284c7'
+                    });
+                } else {
+                    alert('ท่านกำลังใช้งาน VCC ผ่านแอปอยู่แล้ว');
+                }
+            } else {
+                // คำแนะนำสำหรับ iOS Safari หรือเดสก์ท็อปที่กดยกเลิกไปก่อนหน้า
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                if (isIOS) {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            icon: 'info',
+                            title: 'วิธีติดตั้งบน iPhone / iPad',
+                            html: '<div style="text-align:left; font-size:14px; line-height:1.8;">1. แตะปุ่ม <b>แชร์ (Share)</b> <i class="fas fa-arrow-up-from-bracket"></i> ที่แถบเครื่องมือล่างสุดของ Safari<br>2. เลื่อนลงแล้วเลือก <b>"เพิ่มไปยังหน้าจอโฮม" (Add to Home Screen)</b> <i class="fas fa-plus-square"></i><br>3. แตะ <b>"เพิ่ม" (Add)</b> ที่มุมขวาบน</div>',
+                            confirmButtonText: 'เข้าใจแล้ว',
+                            confirmButtonColor: '#0284c7'
+                        });
+                    } else {
+                        alert('วิธีติดตั้งบน iOS: แตะปุ่มแชร์ใน Safari แล้วเลือก "เพิ่มไปยังหน้าจอโฮม" (Add to Home Screen)');
+                    }
+                } else {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            icon: 'info',
+                            title: 'วิธีติดตั้งแอป VCC',
+                            html: '<div style="text-align:left; font-size:14px; line-height:1.8;">หากปุ่มติดตั้งไม่ปรากฏอัตโนมัติ:<br>• <b>คอมพิวเตอร์ (Chrome/Edge):</b> คลิกไอคอนรูปคอมพิวเตอร์/ลูกศรลง <i class="fas fa-download"></i> ที่แถบกรอก URL ด้านบนขวา<br>• <b>Android (Chrome):</b> แตะเมนู 3 จุด <b>⋮</b> ที่มุมขวาบน แล้วเลือก <b>"ติดตั้งแอป" (Install app)</b> หรือ <b>"เพิ่มลงในหน้าจอหลัก"</b></div>',
+                            confirmButtonText: 'ตกลง',
+                            confirmButtonColor: '#0284c7'
+                        });
+                    } else {
+                        alert('คลิกไอคอนติดตั้งแอปที่แถบ URL หรือเมนูของเบราว์เซอร์เพื่อติดตั้ง');
+                    }
+                }
+            }
+        }
+    };
+
+    // C. เมื่อติดตั้งแอปสำเร็จ
+    window.addEventListener('appinstalled', () => {
+        console.log('🎉 ติดตั้งแอป VCC ลงเครื่องเรียบร้อยแล้ว');
+        const topbarBtn = document.getElementById('pwaInstallBtn');
+        const publicBtn = document.getElementById('publicPwaInstallBtn');
+        if (topbarBtn) topbarBtn.style.display = 'none';
+        if (publicBtn) publicBtn.style.display = 'none';
+        deferredPwaPrompt = null;
+
+        if (typeof Swal !== 'undefined') {
+            const Toast = Swal.mixin({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 4000,
+                timerProgressBar: true
+            });
+            Toast.fire({
+                icon: 'success',
+                title: 'ติดตั้งแอป VCC สำเร็จ! เปิดใช้งานจากหน้าจอโฮมได้ทันที'
+            });
+        }
+    });
+
+    // D. ลงทะเบียน Service Worker และตรวจสอบเวอร์ชันอัปเดต
+    if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js?v=1.0', { scope: './' })
+                .then(reg => {
+                    console.log('✅ VCC Service Worker ลงทะเบียนสำเร็จ Scope:', reg.scope);
+
+                    // ตรวจจับเมื่อมี Service Worker ตัวใหม่รออัปเดต
+                    reg.addEventListener('updatefound', () => {
+                        newSwWorker = reg.installing;
+                        if (newSwWorker) {
+                            newSwWorker.addEventListener('statechange', () => {
+                                if (newSwWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // มีอัปเดตใหม่พร้อมทำงาน
+                                    showPwaUpdateToast();
+                                }
+                            });
+                        }
+                    });
+                })
+                .catch(err => {
+                    console.warn('⚠️ Service Worker Registration failed:', err);
+                });
+
+            // เมื่อ Service Worker คอนโทรลเลอร์เปลี่ยน (หลัง skipWaiting) ให้รีโหลดหน้าจอเพื่อใช้เวอร์ชันใหม่
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (!refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                }
+            });
+        });
+    }
+
+    // E. แสดงการแจ้งเตือนเมื่อมีอัปเดตระบบใหม่ (PWA Update Prompt)
+    function showPwaUpdateToast() {
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                title: 'มีอัปเดตระบบเวอร์ชันใหม่',
+                text: 'ระบบได้ดาวน์โหลดส่วนปรับปรุงล่าสุดแล้ว ต้องการรีโหลดเพื่อใช้งานทันทีหรือไม่?',
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: '<i class="fas fa-sync-alt"></i> อัปเดตทันที',
+                cancelButtonText: 'ไว้ภายหลัง',
+                confirmButtonColor: '#0284c7',
+                cancelButtonColor: '#94a3b8'
+            }).then(result => {
+                if (result.isConfirmed) {
+                    if (newSwWorker) {
+                        newSwWorker.postMessage({ type: 'SKIP_WAITING' });
+                    } else {
+                        window.location.reload();
+                    }
+                }
+            });
+        }
+    }
+
+    // F. ตรวจจับสถานะ Online / Offline
+    window.addEventListener('online', () => {
+        console.log('🌐 เชื่อมต่ออินเทอร์เน็ตแล้ว');
+        if (typeof Swal !== 'undefined') {
+            const Toast = Swal.mixin({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 3000
+            });
+            Toast.fire({
+                icon: 'success',
+                title: 'เชื่อมต่ออินเทอร์เน็ตแล้ว'
+            });
+        }
+    });
+
+    window.addEventListener('offline', () => {
+        console.warn('📡 ขาดการเชื่อมต่ออินเทอร์เน็ต — เข้าสู่โหมดออฟไลน์');
+        if (typeof Swal !== 'undefined') {
+            const Toast = Swal.mixin({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 5000,
+                timerProgressBar: true
+            });
+            Toast.fire({
+                icon: 'warning',
+                title: 'ออฟไลน์: ระบบกำลังใช้ไฟล์แคชในเครื่อง'
+            });
+        }
+    });
 </script>
 
 <!-- Mini Appointment Slip Dedicated Print Container -->
