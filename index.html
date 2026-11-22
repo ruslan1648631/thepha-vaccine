@@ -1533,6 +1533,11 @@
             color: #0369a1;
             border: 1px solid #7dd3fc;
         }
+        .status-moved {
+            background: #fef3c7;
+            color: #b45309;
+            border: 1px solid #fde68a;
+        }
 
         .role-badge {
             display: inline-block;
@@ -2763,8 +2768,14 @@
         .rpt-sum-card.c-refused {
             border-top-color: #ea5455;
         }
+        .rpt-sum-card.c-moved {
+            border-top-color: #f59e0b;
+        }
         .rpt-sum-card.c-other {
             border-top-color: #6c757d;
+        }
+        tr.rpt-row-moved {
+            background-color: #fffbeb !important;
         }
         
         .rpt-sum-label {
@@ -10394,28 +10405,82 @@
         // 36. ดึงรายงานผลการติดตาม (Get Tracking Report)
         if (fnName === 'getTrackingReport') {
             const filters = args[0] || {};
-            let q = supabaseClient.from('VCC_tracking').select('*').order('Timestamp', { ascending: false }).limit(1000);
-            if (filters.status && filters.status !== 'ทั้งหมด') q = q.eq('Status', filters.status);
-            if (filters.reporter && filters.reporter !== 'ทั้งหมด') q = q.eq('Reporter', filters.reporter);
+            let q = supabaseClient.from('VCC_tracking').select('*').order('Timestamp', { ascending: false }).limit(2000);
+            
+            // กรองสถานะ
+            if (filters.status && filters.status !== 'ทั้งหมด') {
+                if (filters.status === 'ย้ายที่อยู่') {
+                    q = q.or('Status.eq.ย้ายที่อยู่,Status.ilike.%ย้าย%,Remarks.ilike.%ย้าย%');
+                } else {
+                    q = q.eq('Status', filters.status);
+                }
+            }
+            if (filters.reporter && filters.reporter !== 'ทั้งหมด') {
+                q = q.eq('Reporter', filters.reporter);
+            }
+
             const { data, error } = await q;
             if (error) throw error;
 
-            const records = (data || []).map(r => ({
+            let records = (data || []).map(r => ({
+                timestamp: r.Timestamp ? formatThaiDate(r.Timestamp, true) : '-',
                 Timestamp: r.Timestamp ? formatThaiDate(r.Timestamp, true) : '-',
+                reporter: r.Reporter || '-',
                 Reporter: r.Reporter || '-',
+                village: r.Village || '-',
                 Village: r.Village || '-',
+                childName: r.ChildName || '-',
                 ChildName: r.ChildName || '-',
-                GPS: r.GPS || '-',
+                gps: r.GPS || '',
+                GPS: r.GPS || '',
+                hasGps: Boolean(r.GPS && r.GPS.includes(',')),
+                vaccine: r.Vaccine || '-',
                 Vaccine: r.Vaccine || '-',
+                status: r.Status || '-',
                 Status: r.Status || '-',
+                files: r.Files || null,
                 Files: r.Files || null,
+                visitDate: r.VisitDate || '-',
                 VisitDate: r.VisitDate || '-',
+                remarks: r.Remarks || '-',
                 Remarks: r.Remarks || '-',
-                ChildId: r.ChildId || '-'
+                childId: r.ChildId || '-',
+                ChildId: r.ChildId || '-',
+                rawTimestamp: r.Timestamp || ''
             }));
 
+            // กรองวันที่ (VisitDate หรือ Timestamp)
+            if (filters.dateFrom) {
+                records = records.filter(r => {
+                    const d = (r.VisitDate && r.VisitDate !== '-') ? r.VisitDate : (r.rawTimestamp ? r.rawTimestamp.slice(0, 10) : '');
+                    return !d || d >= filters.dateFrom;
+                });
+            }
+            if (filters.dateTo) {
+                records = records.filter(r => {
+                    const d = (r.VisitDate && r.VisitDate !== '-') ? r.VisitDate : (r.rawTimestamp ? r.rawTimestamp.slice(0, 10) : '');
+                    return !d || d <= filters.dateTo;
+                });
+            }
+
+            // กรองหมู่บ้าน
+            if (filters.village && filters.village !== 'ทั้งหมด') {
+                records = records.filter(r => r.Village === filters.village || r.Village.includes(filters.village) || filters.village.includes(r.Village));
+            }
+
+            // กรองวัคซีน
+            if (filters.vaccine && filters.vaccine !== 'ทั้งหมด') {
+                records = records.filter(r => r.Vaccine && (r.Vaccine === filters.vaccine || r.Vaccine.includes(filters.vaccine)));
+            }
+
+            // กรองค้นหาชื่อ
+            if (filters.search) {
+                const sLower = filters.search.toLowerCase().trim();
+                records = records.filter(r => r.ChildName.toLowerCase().includes(sLower));
+            }
+
             // Summary stats for charts
-            let total = records.length, onTime = 0, missed = 0, refused = 0, other = 0;
+            let total = records.length, onTime = 0, missed = 0, refused = 0, moved = 0, other = 0;
             const vaccineCount = {};
             const villageCount = {};
             const reporterCount = {};
@@ -10425,6 +10490,7 @@
                 if (st === 'ตามนัดปกติ' || st === 'มาตามนัด') onTime++;
                 else if (st === 'ขาดนัด') missed++;
                 else if (st === 'ปฏิเสธวัคซีน') refused++;
+                else if (st === 'ย้ายที่อยู่' || st.includes('ย้าย')) moved++;
                 else other++;
 
                 if (r.Vaccine && r.Vaccine !== '-') {
@@ -10448,6 +10514,8 @@
                 missedRate: total > 0 ? Math.round((missed / total) * 100) : 0,
                 refused,
                 refusedRate: total > 0 ? Math.round((refused / total) * 100) : 0,
+                moved,
+                movedRate: total > 0 ? Math.round((moved / total) * 100) : 0,
                 other,
                 vaccineCount,
                 villageCount,
@@ -10456,7 +10524,7 @@
 
             return {
                 success: true,
-                headers: ['Timestamp', 'Reporter', 'Village', 'ChildName', 'GPS', 'Vaccine', 'Status', 'Files'],
+                headers: ['Timestamp', 'Reporter', 'Village', 'ChildName', 'GPS', 'Vaccine', 'Status', 'Remarks', 'Files'],
                 records,
                 summary
             };
@@ -12004,6 +12072,7 @@ function collapseAllVillages() {
         if (status === 'ตามนัดปกติ') return 'status-ontime';
         if (status === 'ขาดนัด') return 'status-missed';
         if (status === 'ปฏิเสธวัคซีน') return 'status-refused';
+        if (status === 'ย้ายที่อยู่' || (status && status.includes('ย้าย'))) return 'status-moved';
         if (status === 'ครบตามเกณฑ์') return 'status-complete';
         return 'status-pending';
     }
@@ -19948,7 +20017,10 @@ function updateBottomNavActive(page) {
             '<select id="rptVillage"' + (lockVillage ? ' disabled' : '') + '>' + villageOpts + '</select></div>' +
             '<div class="rpt-fg"><label><i class="fas fa-tasks"></i> สถานะ</label>' +
             '<select id="rptStatus"><option value="ทั้งหมด">-- ทั้งหมด --</option>' +
-            '<option>ตามนัดปกติ</option><option>ขาดนัด</option><option>ปฏิเสธวัคซีน</option></select></div>' +
+            '<option value="ย้ายที่อยู่">🚚 ย้ายที่อยู่</option>' +
+            '<option value="ตามนัดปกติ">ตามนัดปกติ</option>' +
+            '<option value="ขาดนัด">ขาดนัด</option>' +
+            '<option value="ปฏิเสธวัคซีน">ปฏิเสธวัคซีน</option></select></div>' +
             '<div class="rpt-fg"><label><i class="fas fa-syringe"></i> วัคซีน</label>' +
             '<select id="rptVaccine"><option value="ทั้งหมด">-- ทั้งหมด --</option>' + vaccineOptions + '</select></div>' +
             '<div class="rpt-fg"><label><i class="fas fa-user"></i> ผู้รายงาน</label>' +
@@ -19961,6 +20033,7 @@ function updateBottomNavActive(page) {
             '<button class="btn-rpt-reset" id="rptResetBtn"><i class="fas fa-undo"></i> รีเซ็ต</button>' +
             '<button class="btn-rpt-print" id="rptPrintBtn"><i class="fas fa-print"></i> พิมพ์</button>' +
             '<button class="btn-rpt-csv" id="rptCsvBtn"><i class="fas fa-file-csv"></i> Export CSV</button>' +
+            '<button class="btn-rpt-excel" id="rptExcelBtn" style="background:#16a34a; color:#fff; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer;"><i class="fas fa-file-excel"></i> Export Excel</button>' +
             '</div></div>' +
             '<div id="rptSummaryStrip" class="rpt-summary-strip"></div>' +
             '<div id="rptChartsRow" class="rpt-charts-row"></div>' +
@@ -19990,6 +20063,8 @@ function updateBottomNavActive(page) {
     window.print();
 });
         document.getElementById('rptCsvBtn').addEventListener('click', exportRptCsv);
+        const rptExcelBtn = document.getElementById('rptExcelBtn');
+        if (rptExcelBtn) rptExcelBtn.addEventListener('click', exportRptExcel);
 
         doLoadReport();
     }
@@ -20054,6 +20129,7 @@ function updateBottomNavActive(page) {
             sumCard('c-ontime', 'fas fa-check-circle', 'มาตามนัด', sm.onTime || 0, sm.onTimeRate || 0) +
             sumCard('c-missed', 'fas fa-exclamation-circle', 'ขาดนัด', sm.missed || 0, sm.missedRate || 0) +
             sumCard('c-refused', 'fas fa-times-circle', 'ปฏิเสธวัคซีน', sm.refused || 0, sm.refusedRate || 0) +
+            sumCard('c-moved', 'fas fa-truck-moving', 'ย้ายที่อยู่', sm.moved || 0, sm.movedRate || 0) +
             sumCard('c-other', 'fas fa-question-circle', 'อื่นๆ/ไม่ระบุ', sm.other || 0);
     }
 
@@ -20119,14 +20195,10 @@ function updateBottomNavActive(page) {
                 APP.rptCharts.status = new Chart(ctxS, {
                     type: 'doughnut',
                     data: {
-                        labels: ['มาตามนัดปกติ', 'ขาดนัด', 'ปฏิเสธวัคซีน', 'อื่นๆ'],
+                        labels: ['มาตามนัดปกติ', 'ขาดนัด', 'ปฏิเสธวัคซีน', 'ย้ายที่อยู่', 'อื่นๆ'],
                         datasets: [{
-                            data: [sm.onTime || 0, sm.missed || 0, sm.refused || 0, sm
-                                .other || 0
-                            ],
-                            backgroundColor: ['#28c76f', '#ff9f43', '#ea5455',
-                                '#b0b7c3'
-                            ],
+                            data: [sm.onTime || 0, sm.missed || 0, sm.refused || 0, sm.moved || 0, sm.other || 0],
+                            backgroundColor: ['#28c76f', '#ff9f43', '#ea5455', '#f59e0b', '#b0b7c3'],
                             borderWidth: 0,
                             hoverOffset: 8
                         }]
@@ -20202,6 +20274,7 @@ function updateBottomNavActive(page) {
             '<th>' + esc(APP.rptHeaders[3] || 'ChildName') + '</th>' +
             '<th>' + esc(APP.rptHeaders[5] || 'Vaccine') + '</th>' +
             '<th>' + esc(APP.rptHeaders[6] || 'Status') + '</th>' +
+            '<th>หมายเหตุ / ข้อมูลที่อยู่ใหม่</th>' +
             '<th>' + esc(APP.rptHeaders[4] || 'GPS') + '</th>' +
             '<th>' + esc(APP.rptHeaders[7] || 'Files') + '</th>' +
             '</tr></thead>' +
@@ -20210,12 +20283,11 @@ function updateBottomNavActive(page) {
                 records.map(function(r, idx) {
                     const rowCls = r.status === 'ตามนัดปกติ' ? 'rpt-row-ontime' :
                         r.status === 'ขาดนัด' ? 'rpt-row-missed' :
-                        r.status === 'ปฏิเสธวัคซีน' ? 'rpt-row-refused' : '';
+                        r.status === 'ปฏิเสธวัคซีน' ? 'rpt-row-refused' :
+                        (r.status === 'ย้ายที่อยู่' || (r.status && r.status.includes('ย้าย'))) ? 'rpt-row-moved' : '';
                     return '<tr class="' + rowCls + '">' +
-                        '<td style="text-align:center;color:#aaa;font-size:12px">' + (idx +
-                        1) + '</td>' +
-                        '<td style="white-space:nowrap;font-size:12px">' + formatDateTime(r
-                            .timestamp) + '</td>' +
+                        '<td style="text-align:center;color:#aaa;font-size:12px">' + (idx + 1) + '</td>' +
+                        '<td style="white-space:nowrap;font-size:12px">' + formatDateTime(r.timestamp) + '</td>' +
                         '<td>' + esc(r.reporter) + '</td>' +
                         '<td>' + esc(r.village) + '</td>' +
                         '<td style="font-weight:500">' + esc(r.childName) + '</td>' +
@@ -20223,16 +20295,14 @@ function updateBottomNavActive(page) {
                             '<span style="background:#e8eaff;color:#0284c7;border-radius:5px;padding:2px 8px;font-size:12px">' +
                             esc(r.vaccine) + '</span>' :
                             '<span style="color:#ccc">-</span>') + '</td>' +
-                        '<td><span class="status-badge ' + getStatusClass(r.status) +
-                        '">' + esc(r.status || '-') + '</span></td>' +
+                        '<td><span class="status-badge ' + getStatusClass(r.status) + '">' + esc(r.status || '-') + '</span></td>' +
+                        '<td style="font-size:12.5px;max-width:250px;white-space:normal;color:#334155;">' + esc(r.remarks || r.Remarks || '-') + '</td>' +
                         '<td>' + (r.hasGps ?
                             '<a class="gps-link" href="https://www.openstreetmap.org/?mlat=' +
-                            (r.gps ? r.gps.split(',')[0] : '') + '&mlon=' + (r.gps ? r
-                                .gps.split(',')[1] : '') + '#map=15/' + (r.gps || '') +
+                            (r.gps ? r.gps.split(',')[0] : '') + '&mlon=' + (r.gps ? r.gps.split(',')[1] : '') + '#map=15/' + (r.gps || '') +
                             '" target="_blank"><i class="fas fa-map-marker-alt"></i> ดูแผนที่</a>' :
                             '<span style="color:#ccc;font-size:12px">-</span>') + '</td>' +
-                        '<td style="font-size:12px;color:#888">' + esc(r.files || '-') +
-                        '</td>' +
+                        '<td style="font-size:12px;color:#888">' + esc(r.files || '-') + '</td>' +
                         '</tr>';
                 }).join('') :
                 '') +
@@ -20251,7 +20321,7 @@ function updateBottomNavActive(page) {
                 ],
                 scrollX: true,
                 autoWidth: false,
-                columnDefs: [{ orderable: false, targets: [7, 8] }]
+                columnDefs: [{ orderable: false, targets: [8, 9] }]
             });
             setTimeout(function() {
                 if ($.fn.DataTable.isDataTable('#rptTable')) {
@@ -20266,28 +20336,35 @@ function updateBottomNavActive(page) {
             return Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลสำหรับ export', 'info');
         }
 
+        const selStatus = (document.getElementById('rptStatus') || {}).value || 'ทั้งหมด';
+        const isMoved = selStatus === 'ย้ายที่อยู่';
+
         const rows = [];
         rows.push([
             'ลำดับ',
-            APP.rptHeaders[0] || 'Timestamp',
-            APP.rptHeaders[1] || 'Reporter',
-            APP.rptHeaders[2] || 'Village',
-            APP.rptHeaders[3] || 'ChildName',
-            APP.rptHeaders[5] || 'Vaccine',
-            APP.rptHeaders[6] || 'Status',
-            APP.rptHeaders[4] || 'GPS',
-            APP.rptHeaders[7] || 'Files'
+            'วันที่-เวลาบันทึก (Timestamp)',
+            'ผู้รายงาน (Reporter)',
+            'หมู่บ้าน (Village)',
+            'ชื่อ-นามสกุลเด็ก (ChildName)',
+            'วัคซีน (Vaccine)',
+            'สถานะการติดตาม (Status)',
+            'หมายเหตุ / ข้อมูลที่อยู่ใหม่ (Remarks)',
+            'วันที่ติดตามจริง (VisitDate)',
+            'พิกัด GPS',
+            'ไฟล์แนบ (Files)'
         ]);
 
         APP.rptAllRecords.forEach(function(r, i) {
             rows.push([
                 i + 1,
                 formatDateTime(r.timestamp),
-                r.reporter,
-                r.village,
-                r.childName,
+                r.reporter || '',
+                r.village || '',
+                r.childName || '',
                 r.vaccine || '',
                 r.status || '',
+                r.remarks || r.Remarks || '',
+                r.visitDate || r.VisitDate || '',
                 r.gps || '',
                 r.files || ''
             ]);
@@ -20305,11 +20382,72 @@ function updateBottomNavActive(page) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'VCC_tracking_report_' + new Date().toISOString().slice(0, 10) + '.csv';
+        const prefix = isMoved ? 'VCC_Moved_Report_' : 'VCC_tracking_report_';
+        a.download = prefix + new Date().toISOString().slice(0, 10) + '.csv';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    function exportRptExcel() {
+        if (!APP.rptAllRecords || APP.rptAllRecords.length === 0) {
+            return Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลสำหรับ export', 'info');
+        }
+
+        const selStatus = (document.getElementById('rptStatus') || {}).value || 'ทั้งหมด';
+        const isMoved = selStatus === 'ย้ายที่อยู่';
+
+        const rows = [
+            [
+                'ลำดับ',
+                'วันที่-เวลาบันทึก (Timestamp)',
+                'ผู้รายงาน (Reporter)',
+                'หมู่บ้าน (Village)',
+                'ชื่อ-นามสกุลเด็ก (ChildName)',
+                'วัคซีน (Vaccine)',
+                'สถานะการติดตาม (Status)',
+                'หมายเหตุ / ข้อมูลที่อยู่ใหม่ (Remarks)',
+                'วันที่ติดตามจริง (VisitDate)',
+                'พิกัด GPS',
+                'ไฟล์แนบ (Files)'
+            ]
+        ];
+
+        APP.rptAllRecords.forEach(function(r, i) {
+            rows.push([
+                i + 1,
+                formatDateTime(r.timestamp),
+                r.reporter || '',
+                r.village || '',
+                r.childName || '',
+                r.vaccine || '',
+                r.status || '',
+                r.remarks || r.Remarks || '',
+                r.visitDate || r.VisitDate || '',
+                r.gps || '',
+                r.files || ''
+            ]);
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!cols'] = [6, 20, 18, 15, 25, 20, 15, 32, 15, 22, 12].map(w => ({ wch: w }));
+
+        const sheetName = isMoved ? 'เด็กย้ายที่อยู่' : 'รายงานการติดตาม';
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+        const prefix = isMoved ? 'VCC_Moved_Report_' : 'VCC_tracking_report_';
+        const fileName = prefix + new Date().toISOString().slice(0, 10) + '.xlsx';
+        XLSX.writeFile(wb, fileName);
+
+        Swal.fire({
+            icon: 'success',
+            title: 'ส่งออก Excel สำเร็จ',
+            text: fileName + ' (' + APP.rptAllRecords.length + ' รายการ)',
+            timer: 2500,
+            showConfirmButton: false
+        });
     }
 
     async function loadManageDataPage() {
