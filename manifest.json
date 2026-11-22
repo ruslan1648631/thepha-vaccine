@@ -57,6 +57,13 @@
       "description": "ตรวจสอบรายชื่อนัดรับวัคซีนและเคสขาดนัด",
       "url": "./index.html#appointments",
       "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "อสม. บันทึกผลติดตาม",
+      "short_name": "อสม.ติดตาม",
+      "description": "หน้าบันทึกผลติดตามวัคซีนแบบรวดเร็วบนมือถือสำหรับ อสม.",
+      "url": "./index.html#vhvFastTrack",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }
