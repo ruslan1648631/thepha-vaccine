@@ -29885,25 +29885,38 @@ window.exportDtpBySchoolExcel = async function() {
         showLoading();
 
         try {
-            // ดึงรายชื่อหมู่บ้าน
-            const vRes = await callGAS('getVillages', []);
-            const villages = (vRes.success ? vRes.villages : []).map(v => v.name || v);
-
-            // ดึง hcode จาก user
+            // ตรวจสอบสิทธิ์ผู้ใช้งาน
+            const isAmpur = isAdminAmpurUser() || isSpecialOfficerUser();
+            const userRole = APP.currentUser.role || 'เจ้าหน้าที่';
             const userHcode = APP.currentUser.hcode || APP.currentUser.facility || '';
-            const userVillage = APP.currentUser.village || '';
-            const isVHV = !isAdminAmpurUser() && !isAdminHOSUser() && APP.currentUser.role !== 'เจ้าหน้าที่';
+            const userVillage = (APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village.trim() : '';
+            const isVHV = (userRole === 'อสม.' || userRole === 'VHV' || (!isAdminAmpurUser() && !isAdminHOSUser() && userRole !== 'เจ้าหน้าที่'));
+
+            // ✅ ดึงรายชื่อหมู่บ้านเฉพาะของสถานพยาบาลที่รับผิดชอบ
+            const vRes = await callGAS('getVillages', [userRole, userHcode]);
+            let villages = (vRes.success ? vRes.villages : []).map(v => v.name || v.village_name || v);
+
+            // ถ้าเป็น อสม. และมีหมู่บ้านประจำตัว ให้กรองให้เหลือเฉพาะหมู่บ้านตนเอง
+            if (isVHV && userVillage) {
+                const matched = villages.filter(v => v.includes(userVillage) || userVillage.includes(v));
+                villages = matched.length > 0 ? matched : [userVillage];
+            }
+
+            // บันทึกหมู่บ้านที่ได้รับอนุญาตไว้ใน global scope เพื่อใช้ตรวจสอบสิทธิ์ในฟังก์ชันอื่น
+            window._currentAllowedVillages = villages;
 
             // ค่าเริ่มต้น URL param (เปิดจากลิงก์เฉพาะหมู่บ้าน)
             const urlParams = new URLSearchParams(window.location.search);
-            const presetMoo = urlParams.get('moo') || userVillage;
-            const presetHcode = urlParams.get('hcode') || userHcode;
+            const presetMoo = urlParams.get('moo') || userVillage || (villages.length > 0 ? villages[0] : '');
 
             hideLoading();
 
             const villageOpts = villages.map(v =>
                 `<option value="${esc(v)}" ${v === presetMoo ? 'selected' : ''}>${esc(v)}</option>`
             ).join('');
+
+            // ปิดการเปลี่ยนหมู่บ้านหากเป็น อสม. ที่มีหมู่บ้านประจำตัว
+            const isMooDisabled = isVHV && userVillage ? 'disabled style="background:#f1f5f9; cursor:not-allowed; flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;"' : 'style="flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;"';
 
             page.innerHTML = `
             <div class="page-title"><i class="fas fa-mobile-alt"></i> อสม. บันทึกผลติดตามวัคซีน</div>
@@ -29912,7 +29925,7 @@ window.exportDtpBySchoolExcel = async function() {
               <!-- SHARE LINK BOX (เจ้าหน้าที่เท่านั้น) -->
               ${!isVHV ? `
               <div class="section-card" style="background:#f0fdf4; border:1px solid #bbf7d0; margin-bottom:16px;">
-                <h4 style="color:#16a34a; margin-bottom:8px;"><i class="fas fa-share-alt"></i> ลิงก์เปิดบนมือถือ อสม.</h4>
+                <h4 style="color:#16a34a; margin-bottom:8px;"><i class="fas fa-share-alt"></i> ลิงก์เปิดบนมือถือ อสม. (ในเขตสถานพยาบาล)</h4>
                 <p style="font-size:13px; color:#374151; margin-bottom:10px;">คัดลอกลิงก์ส่งให้ อสม. แต่ละหมู่บ้าน — เปิดแล้วล็อกอินด้วยบัญชี อสม. ได้เลย</p>
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                   <select id="linkMooSelect" style="flex:1; min-width:160px; padding:8px; border-radius:8px; border:1px solid #d1d5db;">
@@ -29930,8 +29943,8 @@ window.exportDtpBySchoolExcel = async function() {
               <div class="section-card">
                 <h4 style="margin-bottom:12px;"><i class="fas fa-search" style="color:#0284c7;"></i> ค้นหาเด็กที่ต้องติดตาม</h4>
                 <div style="display:flex; gap:8px; margin-bottom:10px;">
-                  <select id="ft_moo" style="flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;" ${isVHV ? 'disabled style="background:#f1f5f9; flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;"' : ''}>
-                    <option value="">-- หมู่บ้าน --</option>
+                  <select id="ft_moo" ${isMooDisabled}>
+                    ${!isVHV || !userVillage ? '<option value="">-- ทุกหมู่บ้านในเขตรับผิดชอบ --</option>' : ''}
                     ${villageOpts}
                   </select>
                 </div>
@@ -29983,9 +29996,9 @@ window.exportDtpBySchoolExcel = async function() {
                   <!-- รายละเอียดเพิ่มเติมตามสถานะ -->
                   <div id="ft_extraFields" style="display:none; margin-bottom:12px;"></div>
 
-                  <input type="text" id="ft_vhvName" placeholder="ชื่อ อสม. ผู้บันทึก (ไม่บังคับ)"
+                  <input type="text" id="ft_vhvName" placeholder="ชื่อ อสม. ผู้บันทึก"
                     value="${esc(APP.currentUser.fullname || APP.currentUser.name || '')}"
-                    style="width:100%; padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; margin-bottom:10px; box-sizing:border-box;">
+                    ${isVHV ? 'readonly style="width:100%; padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; margin-bottom:10px; box-sizing:border-box; background:#f1f5f9; cursor:not-allowed;"' : 'style="width:100%; padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; margin-bottom:10px; box-sizing:border-box;"'}>
                   <textarea id="ft_remark" rows="2" placeholder="หมายเหตุเพิ่มเติม (ไม่บังคับ)"
                     style="width:100%; padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; resize:vertical; box-sizing:border-box;"></textarea>
 
@@ -29998,7 +30011,7 @@ window.exportDtpBySchoolExcel = async function() {
 
               <!-- ประวัติที่บันทึกวันนี้ -->
               <div class="section-card" style="margin-top:0;">
-                <h4 style="margin-bottom:10px; font-size:14px;"><i class="fas fa-history" style="color:#7c3aed;"></i> บันทึกของวันนี้</h4>
+                <h4 style="margin-bottom:10px; font-size:14px;"><i class="fas fa-history" style="color:#7c3aed;"></i> บันทึกของวันนี้ (เฉพาะเขตรับผิดชอบ)</h4>
                 <div id="ft_todayLog" style="font-size:13px; color:#6b7280;">กำลังโหลด...</div>
               </div>
 
@@ -30036,6 +30049,13 @@ window.exportDtpBySchoolExcel = async function() {
         el.innerHTML = '<div style="color:#6b7280; font-size:13px; padding:10px 0;"><i class="fas fa-spinner fa-spin"></i> กำลังค้นหาข้อมูล...</div>';
         
         try {
+            const isAmpur = isAdminAmpurUser() || isSpecialOfficerUser();
+            const userRole = APP.currentUser.role || 'เจ้าหน้าที่';
+            const userHcode = APP.currentUser.hcode || '';
+            const userVillage = (APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village.trim() : '';
+            const isVHV = (userRole === 'อสม.' || userRole === 'VHV' || (!isAdminAmpurUser() && !isAdminHOSUser() && userRole !== 'เจ้าหน้าที่'));
+            const allowedVillages = window._currentAllowedVillages || [];
+
             let results = [];
             if (q) {
                 // ค้นหาผ่าน searchChild เพื่อรองรับทั้งชื่อ-สกุล, CID, HN อย่างแม่นยำ ไม่ติดข้อจำกัดประเภทข้อมูล bigint
@@ -30058,8 +30078,26 @@ window.exportDtpBySchoolExcel = async function() {
                 });
             }
 
+            // ✅ กรองความปลอดภัย: แสดงเฉพาะเด็กในสถานพยาบาลหรือหมู่บ้านที่ตนเองรับผิดชอบ
+            if (!isAmpur) {
+                results = results.filter(c => {
+                    const cHcode = String(c.hcode || '').trim();
+                    const cVill  = String(c.villageName || c.villname || c.village || c.moo || '').trim();
+
+                    // ถ้าเป็น อสม. ที่มีหมู่บ้านประจำ: ต้องเป็นเด็กในหมู่บ้านตนเองเท่านั้น
+                    if (isVHV && userVillage) {
+                        return cVill && (cVill === userVillage || cVill.includes(userVillage) || userVillage.includes(cVill));
+                    }
+
+                    // ถ้าเป็นเจ้าหน้าที่ หรือ อสม.ทั่วไป: ต้องตรงกับสถานพยาบาลตนเอง หรืออยู่ในหมู่บ้านที่ได้รับอนุญาต
+                    const matchHcode = (userHcode && userHcode !== '-') ? (cHcode === userHcode || cHcode === userHcode.replace(/^0+/, '') || cHcode === userHcode.padStart(5, '0')) : true;
+                    const matchVill = allowedVillages.some(v => v === cVill || cVill.includes(v) || v.includes(cVill));
+                    return matchHcode || matchVill;
+                });
+            }
+
             if (!results || !results.length) {
-                el.innerHTML = '<div style="color:#dc2626; padding:10px; font-size:13px; background:#fef2f2; border-radius:8px; border:1px solid #fee2e2;"><i class="fas fa-exclamation-circle"></i> ไม่พบข้อมูลเด็กตามเงื่อนไขที่ค้นหา</div>';
+                el.innerHTML = '<div style="color:#dc2626; padding:10px; font-size:13px; background:#fef2f2; border-radius:8px; border:1px solid #fee2e2;"><i class="fas fa-exclamation-circle"></i> ไม่พบข้อมูลเด็กตามเงื่อนไขที่ค้นหา (หรือเด็กอยู่นอกเขตรับผิดชอบ)</div>';
                 return;
             }
 
@@ -30220,15 +30258,44 @@ window.exportDtpBySchoolExcel = async function() {
             const { data, error } = await supabaseClient.from('VCC_tracking')
                 .select('ChildId, ChildName, Village, Status, Remarks, Reporter, VisitDate, Timestamp')
                 .order('Timestamp', { ascending: false })
-                .limit(20);
+                .limit(100);
             if (error) throw error;
 
-            // กรองของวันนี้ หรือแสดง 10 รายการล่าสุด
-            const todayData = (data || []).filter(r => (r.VisitDate === today || (r.Timestamp && r.Timestamp.startsWith(today))));
-            const displayData = todayData.length > 0 ? todayData : (data || []).slice(0, 10);
+            const userRole = APP.currentUser.role || 'เจ้าหน้าที่';
+            const userVillage = (APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village.trim() : '';
+            const isVHV = (userRole === 'อสม.' || userRole === 'VHV' || (!isAdminAmpurUser() && !isAdminHOSUser() && userRole !== 'เจ้าหน้าที่'));
+            const isAmpur = isAdminAmpurUser() || isSpecialOfficerUser();
+            const allowedVillages = window._currentAllowedVillages || [];
+
+            let filteredData = data || [];
+
+            // ✅ กรองสิทธิ์แสดงข้อมูลเฉพาะสถานพยาบาลหรือหมู่บ้านที่ อสม./เจ้าหน้าที่รับผิดชอบเท่านั้น
+            if (!isAmpur) {
+                filteredData = filteredData.filter(r => {
+                    const rVill = String(r.Village || '').trim();
+                    const rRep = String(r.Reporter || '').trim();
+                    const myName = String(APP.currentUser.fullname || APP.currentUser.name || '').trim();
+                    const myUser = String(APP.currentUser.username || '').trim();
+
+                    // 1. ถ้าเป็น อสม. ที่มีหมู่บ้านประจำ: เห็นเฉพาะหมู่บ้านตนเอง หรือเคสที่ตนเองเป็นผู้บันทึก
+                    if (isVHV && userVillage) {
+                        return (rVill && (rVill === userVillage || rVill.includes(userVillage) || userVillage.includes(rVill))) ||
+                               (rRep && (rRep === myName || rRep === myUser || rRep.includes(myUser)));
+                    }
+
+                    // 2. ถ้าเป็น เจ้าหน้าที่ หรือ อสม.ทั่วไป: เห็นเฉพาะหมู่บ้านในสถานพยาบาลตนเอง หรือเคสที่ตนเองเป็นผู้บันทึก
+                    const inAllowedVill = allowedVillages.some(v => v === rVill || rVill.includes(v) || v.includes(rVill));
+                    const isMyRecord = rRep && (rRep === myName || rRep === myUser || rRep.includes(myUser));
+                    return inAllowedVill || isMyRecord;
+                });
+            }
+
+            // กรองของวันนี้ หรือแสดง 15 รายการล่าสุดในสิทธิ์ของตนเอง
+            const todayData = filteredData.filter(r => (r.VisitDate === today || (r.Timestamp && r.Timestamp.startsWith(today))));
+            const displayData = todayData.length > 0 ? todayData : filteredData.slice(0, 15);
 
             if (!displayData || !displayData.length) { 
-                el.innerHTML = '<div style="color:#9ca3af; font-size:13px; text-align:center; padding:12px;">ยังไม่มีการบันทึกวันนี้</div>'; 
+                el.innerHTML = '<div style="color:#9ca3af; font-size:13px; text-align:center; padding:12px;">ยังไม่มีการบันทึกในหมู่บ้าน/สถานพยาบาลของท่าน</div>'; 
                 return; 
             }
 
@@ -30240,7 +30307,7 @@ window.exportDtpBySchoolExcel = async function() {
                 'ตามนัดปกติ': '#16a34a' 
             };
 
-            const headerNotice = todayData.length > 0 ? '' : '<div style="color:#64748b; font-size:11px; margin-bottom:6px; font-style:italic;">(ประวัติล่าสุดในระบบ)</div>';
+            const headerNotice = todayData.length > 0 ? '' : '<div style="color:#64748b; font-size:11px; margin-bottom:6px; font-style:italic;">(ประวัติล่าสุดในเขตรับผิดชอบ)</div>';
 
             el.innerHTML = headerNotice + displayData.map(r => {
                 const stColor = statusColors[r.Status] || '#0284c7';
@@ -30295,7 +30362,14 @@ window.exportDtpBySchoolExcel = async function() {
 
             hideLoading();
 
-            const rows = (trackRows || []).map(r => {
+            const isAmpur = isAdminAmpurUser() || isSpecialOfficerUser();
+            const userRole = APP.currentUser.role || 'เจ้าหน้าที่';
+            const userHcode = APP.currentUser.hcode || '';
+            const userVillage = (APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village.trim() : '';
+            const isVHV = (userRole === 'อสม.' || userRole === 'VHV' || (!isAdminAmpurUser() && !isAdminHOSUser() && userRole !== 'เจ้าหน้าที่'));
+            const allowedVillages = window._currentAllowedVillages || [];
+
+            let rows = (trackRows || []).map(r => {
                 const cidStr = String(r.ChildId || '').trim();
                 const child = childMap[cidStr] || {};
                 let st = r.Status;
@@ -30312,6 +30386,21 @@ window.exportDtpBySchoolExcel = async function() {
                     _child: child
                 };
             });
+
+            // ✅ กรองสิทธิ์แสดงเฉพาะข้อมูลเด็กในสถานพยาบาลหรือหมู่บ้านที่ตนเองรับผิดชอบ
+            if (!isAmpur) {
+                rows = rows.filter(r => {
+                    const c = r._child || {};
+                    const cHcode = String(c.hcode || '').trim();
+                    const cVill = String(r.Village || c.villname || c.village || '').trim();
+                    if (isVHV && userVillage) {
+                        return cVill && (cVill === userVillage || cVill.includes(userVillage) || userVillage.includes(cVill));
+                    }
+                    const matchHcode = (userHcode && userHcode !== '-') ? (cHcode === userHcode || cHcode === userHcode.replace(/^0+/, '') || cHcode === userHcode.padStart(5, '0')) : true;
+                    const matchVill = allowedVillages.some(v => v === cVill || cVill.includes(v) || v.includes(cVill));
+                    return matchHcode || matchVill;
+                });
+            }
 
             page.innerHTML = `
             <div class="page-title"><i class="fas fa-file-export"></i> ส่งออกรายชื่อย้าย/ปฏิเสธ → ปรับปรุงใน JHCIS</div>
