@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f1f5f9" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle App Background -->
+  <rect width="512" height="512" rx="115" fill="url(#bgGrad)" />
+
+  <!-- Medical Shield -->
+  <path d="M 256 80 C 330 80 400 110 400 110 C 400 280 256 420 256 420 C 256 420 112 280 112 110 C 112 110 182 80 256 80 Z" 
+        fill="url(#shieldGrad)" 
+        filter="url(#shadow)" />
+
+  <!-- Syringe Icon & Cross -->
+  <!-- Cross -->
+  <path d="M 232 150 L 280 150 L 280 195 L 325 195 L 325 243 L 280 243 L 280 288 L 232 288 L 232 243 L 187 243 L 187 195 L 232 195 Z" fill="#0284c7" />
+
+  <!-- Text VCC -->
+  <text x="256" y="360" font-family="'Kanit', 'Segoe UI', Arial, sans-serif" font-size="52" font-weight="900" fill="#0369a1" text-anchor="middle" letter-spacing="3">VCC</text>
+  <text x="256" y="388" font-family="'Kanit', 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="600" fill="#64748b" text-anchor="middle">THEPHA</text>
+</svg>
