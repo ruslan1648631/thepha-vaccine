@@ -10397,6 +10397,16 @@
 
         // 35. ดึงรายชื่อผู้รายงานผลการติดตาม (Get Tracking Reporters)
         if (fnName === 'getTrackingReporters') {
+            const userRole = args[0] || (APP.currentUser ? APP.currentUser.role : '');
+            const username = args[1] || (APP.currentUser ? APP.currentUser.username : '');
+            const fullname = args[2] || (APP.currentUser ? APP.currentUser.fullname : '');
+            const roleNorm = String(userRole || '').toLowerCase().trim();
+            const isAmpur = (roleNorm === 'admin_ampur' || roleNorm === 'admin');
+
+            if (!isAmpur && (username || fullname)) {
+                return { success: true, reporters: [username || fullname] };
+            }
+
             const { data } = await supabaseClient.from('VCC_tracking').select('Reporter');
             const reporters = [...new Set((data || []).map(r => r.Reporter || r.reporter).filter(Boolean))];
             return { success: true, reporters };
@@ -10406,6 +10416,33 @@
         if (fnName === 'getTrackingReport') {
             const filters = args[0] || {};
             let q = supabaseClient.from('VCC_tracking').select('*').order('Timestamp', { ascending: false }).limit(2000);
+
+            const roleNorm = String(filters.userRole || (APP.currentUser ? APP.currentUser.role : '')).toLowerCase().trim();
+            const isAmpur = (filters.isAmpur === true || roleNorm === 'admin_ampur' || roleNorm === 'admin' || (typeof isAdminAmpurUser === 'function' && isAdminAmpurUser()));
+            const myUser = String(filters.username || (APP.currentUser ? APP.currentUser.username : '') || '').trim();
+            const myName = String(filters.fullname || (APP.currentUser ? APP.currentUser.fullname : '') || '').trim();
+            const myHcode = String(filters.userHcode || (APP.currentUser ? APP.currentUser.hcode : '') || '').trim();
+
+            // 🔒 จำกัดสิทธิ์ให้แสดงเฉพาะตัวเองเท่านั้น (สำหรับเจ้าหน้าที่/อสม. ทั่วไปที่ไม่ใช่ระดับอำเภอ)
+            if (!isAmpur && (myUser || myName || myHcode)) {
+                const orConds = [];
+                if (myUser) {
+                    orConds.push(`Reporter.eq.${myUser}`);
+                    orConds.push(`Reporter.ilike.%${myUser}%`);
+                }
+                if (myName) {
+                    orConds.push(`Reporter.eq.${myName}`);
+                    orConds.push(`Reporter.ilike.%${myName}%`);
+                }
+                if (myHcode && myHcode !== '-') {
+                    orConds.push(`Reporter.ilike.%${myHcode}%`);
+                }
+                if (orConds.length > 0) {
+                    q = q.or(orConds.join(','));
+                }
+            } else if (filters.reporter && filters.reporter !== 'ทั้งหมด') {
+                q = q.eq('Reporter', filters.reporter);
+            }
             
             // กรองสถานะ
             if (filters.status && filters.status !== 'ทั้งหมด') {
@@ -10414,9 +10451,6 @@
                 } else {
                     q = q.eq('Status', filters.status);
                 }
-            }
-            if (filters.reporter && filters.reporter !== 'ทั้งหมด') {
-                q = q.eq('Reporter', filters.reporter);
             }
 
             const { data, error } = await q;
@@ -10477,6 +10511,20 @@
             if (filters.search) {
                 const sLower = filters.search.toLowerCase().trim();
                 records = records.filter(r => r.ChildName.toLowerCase().includes(sLower));
+            }
+
+            // 🔒 กรองซ้ำระดับ Client: จำกัดให้แสดงเฉพาะตัวเองเท่านั้น (ถ้าไม่ใช่ Admin_Ampur)
+            if (!isAmpur && (myUser || myName || myHcode)) {
+                const uLow = myUser.toLowerCase();
+                const nLow = myName.toLowerCase();
+                const hLow = (myHcode && myHcode !== '-') ? myHcode.toLowerCase() : '';
+                records = records.filter(r => {
+                    const rep = String(r.Reporter || r.reporter || '').toLowerCase().trim();
+                    const matchUser = uLow && rep.includes(uLow);
+                    const matchName = nLow && rep.includes(nLow);
+                    const matchHcode = hLow && rep.includes(hLow);
+                    return matchUser || matchName || matchHcode;
+                });
             }
 
             // Summary stats for charts
@@ -19957,7 +20005,7 @@ function updateBottomNavActive(page) {
         try {
             // [แก้ไขแล้ว] โหลดข้อมูลทีละคำสั่งเรียงกัน
             fRes = await callGAS('getFacilityMap', []);
-            repRes = await callGAS('getTrackingReporters', []);
+            repRes = await callGAS('getTrackingReporters', [APP.currentUser.role, APP.currentUser.username, APP.currentUser.fullname]);
             vRes = await callGAS('getVillages', [APP.currentUser.role, APP.currentUser.hcode]);
         } catch (e) {
             hideLoading();
@@ -19974,8 +20022,11 @@ function updateBottomNavActive(page) {
         const lockVillage = (APP.currentUser.role === 'เจ้าหน้าที่' && APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village : '';
 
         const isSpecialOfficer = isSpecialOfficerUser();
+        const isAmpur = isAdminAmpurUser() || isSpecialOfficer;
+        const myRep = APP.currentUser.username || APP.currentUser.fullname;
+
         let facilityFilterHtml = '';
-        if (isAdminAmpurUser() || isSpecialOfficer) {
+        if (isAmpur) {
             const facilityOptions = buildFacilityDropdownOptions('ทั้งหมด', '-- ทั้งหมด --');
             facilityFilterHtml = '<div class="rpt-fg"><label><i class="fas fa-hospital"></i> สถานพยาบาล</label>' +
                 '<select id="rptFacility" onchange="cascadeVillageOptions(this.value, \'rptVillage\')">' + facilityOptions + '</select></div>';
@@ -19987,8 +20038,14 @@ function updateBottomNavActive(page) {
                     '>' + esc(v.name) + '</option>';
             }).join('');
 
-        let reporterOpts = '<option value="ทั้งหมด">-- ทั้งหมด --</option>' +
-            reporters.map(function(r) { return '<option value="' + esc(r) + '">' + esc(r) + '</option>'; }).join('');
+        let reporterOpts = '';
+        if (isAmpur) {
+            reporterOpts = '<option value="ทั้งหมด">-- ทั้งหมด --</option>' +
+                reporters.map(function(r) { return '<option value="' + esc(r) + '">' + esc(r) + '</option>'; }).join('');
+        } else {
+            const displayRep = APP.currentUser.fullname ? `${APP.currentUser.fullname} (${APP.currentUser.username})` : myRep;
+            reporterOpts = '<option value="' + esc(myRep) + '" selected>' + esc(displayRep) + '</option>';
+        }
 
         const now = new Date();
         const y = now.getFullYear(), m = now.getMonth();
@@ -20004,7 +20061,9 @@ function updateBottomNavActive(page) {
             '<div class="print-header">' +
             '<h2><i class="fas fa-file-medical-alt"></i> รายงานสรุปการติดตามวัคซีน</h2>' +
             '<p>ระบบติดตามวัคซีนเด็ก 0-5 ปี | พิมพ์: ' + new Date().toLocaleDateString('th-TH') + '</p></div>' +
-            '<div class="page-title"><i class="fas fa-file-medical-alt"></i> รายงานสรุปการติดตามวัคซีน</div>' +
+            '<div class="page-title"><i class="fas fa-file-medical-alt"></i> รายงานสรุปการติดตามวัคซีน' +
+            (!isAmpur ? '<span style="font-size:12px; font-weight:400; background:#e0f2fe; color:#0369a1; padding:4px 10px; border-radius:12px; margin-left:10px;"><i class="fas fa-user-shield"></i> แสดงเฉพาะข้อมูลตนเอง (' + esc(APP.currentUser.fullname || APP.currentUser.username) + ')</span>' : '') +
+            '</div>' +
             '<div class="rpt-filter-card">' +
             '<h4><i class="fas fa-filter"></i> ตัวกรองข้อมูล (VCC_tracking)</h4>' +
             '<div class="rpt-filter-grid">' +
@@ -20024,7 +20083,7 @@ function updateBottomNavActive(page) {
             '<div class="rpt-fg"><label><i class="fas fa-syringe"></i> วัคซีน</label>' +
             '<select id="rptVaccine"><option value="ทั้งหมด">-- ทั้งหมด --</option>' + vaccineOptions + '</select></div>' +
             '<div class="rpt-fg"><label><i class="fas fa-user"></i> ผู้รายงาน</label>' +
-            '<select id="rptReporter">' + reporterOpts + '</select></div>' +
+            '<select id="rptReporter"' + (!isAmpur ? ' disabled style="background:#f1f5f9; cursor:not-allowed;"' : '') + '>' + reporterOpts + '</select></div>' +
             '<div class="rpt-fg"><label><i class="fas fa-search"></i> ค้นหาชื่อเด็ก</label>' +
             '<input type="text" id="rptSearch" placeholder="พิมพ์ชื่อเด็ก..."></div>' +
             '</div>' +
@@ -20053,7 +20112,11 @@ function updateBottomNavActive(page) {
             if (!lockVillage) document.getElementById('rptVillage').value = 'ทั้งหมด';
             document.getElementById('rptStatus').value = 'ทั้งหมด';
             document.getElementById('rptVaccine').value = 'ทั้งหมด';
-            document.getElementById('rptReporter').value = 'ทั้งหมด';
+            if (isAmpur) {
+                document.getElementById('rptReporter').value = 'ทั้งหมด';
+            } else {
+                document.getElementById('rptReporter').value = myRep;
+            }
             document.getElementById('rptSearch').value = '';
             doLoadReport();
         });
@@ -20071,18 +20134,25 @@ function updateBottomNavActive(page) {
     async function doLoadReport() {
         showLoading('กำลังดึงข้อมูลรายงาน...');
 
+        const isAmpur = isAdminAmpurUser() || isSpecialOfficerUser();
+        const rptRepEl = document.getElementById('rptReporter');
+        const reporterVal = !isAmpur ? (APP.currentUser.username || APP.currentUser.fullname) : (rptRepEl ? rptRepEl.value : 'ทั้งหมด');
+
         const filters = {
-            hcode: (document.getElementById('rptFacility') || {}).value || 'ทั้งหมด',
+            hcode: (document.getElementById('rptFacility') || {}).value || (isAmpur ? 'ทั้งหมด' : (APP.currentUser.hcode || '')),
             dateFrom: (document.getElementById('rptDateFrom') || {}).value || '',
             dateTo: (document.getElementById('rptDateTo') || {}).value || '',
             village: (document.getElementById('rptVillage') || {}).value || 'ทั้งหมด',
             status: (document.getElementById('rptStatus') || {}).value || 'ทั้งหมด',
             vaccine: (document.getElementById('rptVaccine') || {}).value || 'ทั้งหมด',
-            reporter: (document.getElementById('rptReporter') || {}).value || 'ทั้งหมด',
+            reporter: reporterVal,
             search: (document.getElementById('rptSearch') || {}).value || '',
             userRole: APP.currentUser.role,      
             userHcode: APP.currentUser.hcode,     
-            userSubdistrict: APP.currentUser.subdistrict 
+            userSubdistrict: APP.currentUser.subdistrict,
+            username: APP.currentUser.username,
+            fullname: APP.currentUser.fullname,
+            isAmpur: isAmpur
         };
 
         if (APP.currentUser.role === 'เจ้าหน้าที่' && APP.currentUser.village && APP.currentUser.village !== '-') {
