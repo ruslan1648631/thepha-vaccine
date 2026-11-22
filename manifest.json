@@ -1,0 +1,62 @@
+{
+  "name": "VCC — ระบบติดตามและเฝ้าระวังวัคซีน อำเภอเทพา",
+  "short_name": "VCC เทพา",
+  "description": "ระบบบริหารจัดการและติดตามความครอบคลุมวัคซีน อำเภอเทพา จังหวัดสงขลา",
+  "lang": "th",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f8fafc",
+  "theme_color": "#0284c7",
+  "categories": ["medical", "health", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "ติดตามวัคซีนคอตีบ",
+      "short_name": "วัคซีนคอตีบ",
+      "description": "รายงานตรวจสอบและติดตามวัคซีนคอตีบไอกรนในพื้นที่ระบาด",
+      "url": "./index.html#dtpReport",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "ค้นหาชื่อเด็กในอำเภอ",
+      "short_name": "ค้นหาเด็ก",
+      "description": "ค้นหาข้อมูลวัคซีนเด็กข้ามเขตในอำเภอเทพา",
+      "url": "./index.html#districtChildSearch",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "รายชื่อนัดวัคซีน",
+      "short_name": "นัดหมาย",
+      "description": "ตรวจสอบรายชื่อนัดรับวัคซีนและเคสขาดนัด",
+      "url": "./index.html#appointments",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
