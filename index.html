@@ -7403,6 +7403,7 @@
                     hcode: rowHcode,
                     hname: rowHname,
                     phone: row.phone || row['โทรศัพท์'] || '-',
+                    asm: row.VHV || row.vhv || row.asm || row['อสม.'] || row['อสม'] || row.VHV_NAME || row.vhv_name || row['ชื่ออสม'] || '-',
                     pcv1DueDate: pcv1DueDate,
                     pcv2DueDate: pcv2DueDate,
                     pcv3DueDate: pcv3DueDate,
@@ -7763,6 +7764,7 @@
                     hcode: rowHcode,
                     hname: rowHname,
                     phone: row.phone || row['โทรศัพท์'] || '-',
+                    asm: row.VHV || row.vhv || row.asm || row['อสม.'] || row['อสม'] || row.VHV_NAME || row.vhv_name || row['ชื่ออสม'] || '-',
                     dtp1: doseResults.DTP1,
                     dtp2: doseResults.DTP2,
                     dtp3: doseResults.DTP3,
@@ -8839,6 +8841,7 @@
                     age: calculateAgeString(row.DOB || row.dob || row.birthdate || row['ว/ด/ปเกิด'] || row['วันเกิด']) || (row.age && row.age !== '-' ? row.age : (row['อายุ'] && row['อายุ'] !== '-' ? row['อายุ'] : '-')),
                     houseNumber: row.house || row.house_no || row.houseNumber || row['บ้านเลขที่'] || '-',
                     phone: row.phone || row['โทรศัพท์'] || '-',
+                    asm: row.VHV || row.vhv || row.asm || row['อสม.'] || row['อสม'] || row.VHV_NAME || row.vhv_name || row['ชื่ออสม'] || '-',
                     fatherName: row.father || row.fatherName || row['ชื่อบิดา'] || '-',
                     motherName: row.mother || row.motherName || row['ชื่อมารดา'] || '-',
                     asm: row.VHV || row.vhv || row.asm || row['อสม.'] || row['อสม'] || '-',
@@ -12406,8 +12409,68 @@ async function warmUpBackend() {
     document.getElementById('loginError').textContent = '';
 }
 
+    const DEFAULT_VACCINE_CATALOG = [
+        { code: 'BCG', name: 'วัณโรค', age_months: 0, description: '0' },
+        { code: 'HBV1', name: 'ตับอักเสบบี 1', age_months: 0, description: '0' },
+        { code: 'HBV2', name: 'ตับอักเสบบี 2', age_months: 1, description: '1 เดือน' },
+        { code: 'HBV3', name: 'ตับอักเสบบี 3', age_months: 2, description: '6 เดือน' },
+        { code: 'DTP+HB1', name: 'ดีทีพีตับอักเสบบี 1', age_months: 2, description: '2 เดือน' },
+        { code: 'DTP+HB+Hib1', name: 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 1', age_months: 2, description: '2 เดือน' },
+        { code: 'DTP1', name: 'คอตีบไอกรนบาดทะยัก 1', age_months: 2, description: '2 เดือน' },
+        { code: 'OPV1', name: 'โอพีวี 1', age_months: 2, description: '2 เดือน' },
+        { code: 'Rotarix1', name: 'โรต้า 2-1', age_months: 2, description: '2 เดือน' },
+        { code: 'Rotateq1', name: 'โรต้า 3-1', age_months: 2, description: '2 เดือน' },
+        { code: 'IPV1', name: 'โปลิโอ แบบฉีด 1', age_months: 2, description: '2 เดือน' },
+        { code: 'DTP+Hib1', name: 'DTP+Hib1', age_months: 2, description: '2 เดือน' },
+        { code: 'DTP+IPV1', name: 'DTP+IPV1', age_months: 2, description: '2 เดือน' },
+        { code: 'DTP+IPV+Hib1', name: 'DTP+IPV+Hib1', age_months: 2, description: '2 เดือน' },
+        { code: 'DTP+IPV+HB+Hib1', name: 'DTP+IPV+HB+Hib1', age_months: 2, description: '2 เดือน' },
+        { code: 'DTP+Hib2', name: 'DTP+Hib2', age_months: 4, description: '4 เดือน' },
+        { code: 'DTP+IPV2', name: 'DTP+IPV2', age_months: 4, description: '4 เดือน' },
+        { code: 'DTP+IPV+Hib2', name: 'DTP+IPV+Hib2', age_months: 4, description: '4 เดือน' },
+        { code: 'DTP+IPV+HB+Hib2', name: 'DTP+IPV+HB+Hib2', age_months: 4, description: '4 เดือน' },
+        { code: 'Rotarix2', name: 'โรต้า 2-2', age_months: 4, description: '4 เดือน' },
+        { code: 'Rotateq2', name: 'โรต้า 3-2', age_months: 4, description: '4 เดือน' },
+        { code: 'IPV2', name: 'โปลิโอ แบบฉีด 2', age_months: 4, description: '4 เดือน' },
+        { code: 'DTP+HB+Hib2', name: 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 2', age_months: 4, description: '4 เดือน' },
+        { code: 'OPV2', name: 'โปลิโอ 2', age_months: 4, description: '4 เดือน' },
+        { code: 'IPV-P', name: 'โปลิโอ แบบฉีด-พี', age_months: 4, description: '4 เดือน' },
+        { code: 'DTP2', name: 'คอตีบไอกรนบาดทะยัก 2', age_months: 4, description: '4 เดือน' },
+        { code: 'DTP+HB2', name: 'ดีทีพีตับอักเสบบี 2', age_months: 4, description: '4 เดือน' },
+        { code: 'DTP+HB3', name: 'ดีทีพีตับอักเสบบี 3', age_months: 6, description: '6 เดือน' },
+        { code: 'DTP3', name: 'คอตีบไอกรนบาดทะยัก 3', age_months: 6, description: '6 เดือน' },
+        { code: 'DTP+HB+Hib3', name: 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 3', age_months: 6, description: '6 เดือน' },
+        { code: 'OPV3', name: 'โปลิโอ 3', age_months: 6, description: '6 เดือน' },
+        { code: 'DTP+Hib3', name: 'DTP+Hib3', age_months: 6, description: '6 เดือน' },
+        { code: 'DTP+IPV3', name: 'DTP+IPV3', age_months: 6, description: '6 เดือน' },
+        { code: 'DTP+IPV+Hib3', name: 'DTP+IPV+Hib3', age_months: 6, description: '6 เดือน' },
+        { code: 'DTP+IPV+HB+Hib3', name: 'DTP+IPV+HB+Hib3', age_months: 6, description: '6 เดือน' },
+        { code: 'Rotateq3', name: 'โรต้า 3-3', age_months: 6, description: '6 เดือน' },
+        { code: 'MMR1', name: 'หัด คางทูม หัดเยอรมัน เข็ม 1', age_months: 9, description: '9 เดือน' },
+        { code: 'LJE1', name: 'ไข้สมองอักเสบเจอีเชื้อเป็น 1', age_months: 12, description: '1 ปี' },
+        { code: 'MMR2', name: 'หัด คางทูม หัดเยอรมัน เข็ม 2', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'DTP4', name: 'คอตีบไอกรนบาดทะยัก กระตุ้น 1', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'OPV4', name: 'โปลิโอ กระตุ้น 1', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'DTP+HB+Hib4', name: 'DTP+HB+Hib4', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'DTP+Hib4', name: 'DTP+Hib4', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'DTP+IPV4', name: 'DTP+IPV4', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'DTP+IPV+Hib4', name: 'DTP+IPV+Hib4', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'DTP+IPV+HB+Hib4', name: 'DTP+IPV+HB+Hib4', age_months: 18, description: '1 ปี 6 เดือน' },
+        { code: 'LJE2', name: 'ไข้สมองอักเสบเจอีเชื้อเป็น 2', age_months: 30, description: '2 ปี 6 เดือน' },
+        { code: 'DTP5', name: 'คอตีบไอกรนบาดทะยัก กระตุ้น 2', age_months: 48, description: '4 ปี' },
+        { code: 'DTP+IPV5', name: 'DTP+IPV5', age_months: 48, description: '4 ปี' },
+        { code: 'DTP+IPV+Hib5', name: 'DTP+IPV+Hib5', age_months: 48, description: '4 ปี' },
+        { code: 'DTP+IPV+HB+Hib5', name: 'DTP+IPV+HB+Hib5', age_months: 48, description: '4 ปี' },
+        { code: 'OPV5', name: 'โปลิโอ กระตุ้น 2', age_months: 48, description: '4 ปี' }
+    ];
+
     async function loadVaccineCatalog() {
-        // ⚡ 1. ลองโหลดจาก Supabase ก่อน
+        // กำหนดค่าเริ่มต้นตามตาราง vaccine_catalog 52 รายการ (CSV)
+        if (!APP.vaccineCatalog || APP.vaccineCatalog.length === 0) {
+            APP.vaccineCatalog = DEFAULT_VACCINE_CATALOG.slice();
+        }
+
+        // ⚡ 1. ลองโหลดจาก Supabase ก่อน (ตาราง vaccine_catalog)
         if (supabaseClient) {
             try {
                 const { data, error } = await supabaseClient.from('vaccine_catalog').select('*');
@@ -12417,14 +12480,21 @@ async function warmUpBackend() {
                     return;
                 }
             } catch (sbErr) {
-                console.warn('⚠️ Supabase loadVaccineCatalog error, fallback to GAS:', sbErr);
+                console.warn('⚠️ Supabase loadVaccineCatalog error, fallback to default catalog:', sbErr);
             }
         }
 
-        // 🔄 2. Fallback ไปยัง Google Apps Script
+        // 🔄 2. Fallback ไปยัง Google Apps Script (ถ้ามีรายการเพิ่มเติม)
         try {
             const result = await callGAS('getVaccineCatalog', []);
-            if (result.success) APP.vaccineCatalog = result.catalog;
+            if (result && result.success && Array.isArray(result.catalog) && result.catalog.length > 0) {
+                result.catalog.forEach(gc => {
+                    const idx = APP.vaccineCatalog.findIndex(x => x.code && x.code.toUpperCase() === gc.code.toUpperCase());
+                    if (idx === -1) {
+                        APP.vaccineCatalog.push(gc);
+                    }
+                });
+            }
         } catch (e) { /* silent */ }
     }
 
@@ -16534,40 +16604,97 @@ function updateBottomNavActive(page) {
     // MINI APPOINTMENT SLIP (ใบนัดวัคซีนขนาดพกพา) ENGINE
     // ============================================================
     const THAI_VACCINE_CATALOG_FALLBACK = {
-        'BCG': 'วัคซีนป้องกันวัณโรค (แรกเกิด)',
-        'HBV1': 'วัคซีนตับอักเสบบี เข็มที่ 1 (แรกเกิด)',
-        'HBV2': 'วัคซีนตับอักเสบบี เข็มที่ 2 (1 เดือน)',
-        'DTP-HB-Hib1': 'วัคซีนรวม 5 โรค (คอตีบ-บาดทะยัก-ไอกรน-ตับอักเสบบี-ฮิบ) เข็มที่ 1 (2 เดือน)',
-        'DTP-HB-Hib2': 'วัคซีนรวม 5 โรค (คอตีบ-บาดทะยัก-ไอกรน-ตับอักเสบบี-ฮิบ) เข็มที่ 2 (4 เดือน)',
-        'DTP-HB-Hib3': 'วัคซีนรวม 5 โรค (คอตีบ-บาดทะยัก-ไอกรน-ตับอักเสบบี-ฮิบ) เข็มที่ 3 (6 เดือน)',
-        'OPV1': 'วัคซีนหยอดโปลิโอ ครั้งที่ 1 (2 เดือน)',
-        'OPV2': 'วัคซีนหยอดโปลิโอ ครั้งที่ 2 (4 เดือน)',
-        'OPV3': 'วัคซีนหยอดโปลิโอ ครั้งที่ 3 (6 เดือน)',
-        'OPV4': 'วัคซีนหยอดโปลิโอ ครั้งที่ 4 (1 ปี 6 เดือน)',
-        'OPV5': 'วัคซีนหยอดโปลิโอ ครั้งที่ 5 (4 ปี)',
-        'IPV': 'วัคซีนฉีดโปลิโอ (4 เดือน)',
-        'IPV1': 'วัคซีนฉีดโปลิโอ เข็มที่ 1 (2 เดือน)',
-        'IPV2': 'วัคซีนฉีดโปลิโอ เข็มที่ 2 (4 เดือน)',
-        'ROTA1': 'วัคซีนหยอดโรต้า ครั้งที่ 1 (2 เดือน)',
-        'ROTA2': 'วัคซีนหยอดโรต้า ครั้งที่ 2 (4 เดือน)',
-        'ROTA3': 'วัคซีนหยอดโรต้า ครั้งที่ 3 (6 เดือน)',
-        'MMR1': 'วัคซีนหัด-คางทูม-หัดเยอรมัน เข็มที่ 1 (9-12 เดือน)',
-        'MMR2': 'วัคซีนหัด-คางทูม-หัดเยอรมัน เข็มที่ 2 (1 ปี 6 เดือน)',
-        'JE1': 'วัคซีนไข้สมองอักเสบเจอี เข็มที่ 1 (1 ปี)',
-        'JE2': 'วัคซีนไข้สมองอักเสบเจอี เข็มที่ 2 (1 ปี 6 เดือน - 2 ปี)',
-        'DTP4': 'วัคซีนคอตีบ-บาดทะยัก-ไอกรน ครั้งที่ 4 (1 ปี 6 เดือน)',
-        'DTP5': 'วัคซีนคอตีบ-บาดทะยัก-ไอกรน ครั้งที่ 5 (4 ปี)',
+        'BCG': 'วัณโรค',
+        'HBV1': 'ตับอักเสบบี 1',
+        'HBV2': 'ตับอักเสบบี 2',
+        'HBV3': 'ตับอักเสบบี 3',
+        'DTP+HB1': 'ดีทีพีตับอักเสบบี 1',
+        'DTP+HB+Hib1': 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 1',
+        'DTP-HB-Hib1': 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 1',
+        'DTP1': 'คอตีบไอกรนบาดทะยัก 1',
+        'OPV1': 'โอพีวี 1',
+        'Rotarix1': 'โรต้า 2-1',
+        'Rotateq1': 'โรต้า 3-1',
+        'IPV1': 'โปลิโอ แบบฉีด 1',
+        'DTP+Hib1': 'DTP+Hib1',
+        'DTP+IPV1': 'DTP+IPV1',
+        'DTP+IPV+Hib1': 'DTP+IPV+Hib1',
+        'DTP+IPV+HB+Hib1': 'DTP+IPV+HB+Hib1',
+        'DTP+Hib2': 'DTP+Hib2',
+        'DTP+IPV2': 'DTP+IPV2',
+        'DTP+IPV+Hib2': 'DTP+IPV+Hib2',
+        'DTP+IPV+HB+Hib2': 'DTP+IPV+HB+Hib2',
+        'Rotarix2': 'โรต้า 2-2',
+        'Rotateq2': 'โรต้า 3-2',
+        'IPV2': 'โปลิโอ แบบฉีด 2',
+        'DTP+HB+Hib2': 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 2',
+        'DTP-HB-Hib2': 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 2',
+        'OPV2': 'โปลิโอ 2',
+        'IPV-P': 'โปลิโอ แบบฉีด-พี',
+        'DTP2': 'คอตีบไอกรนบาดทะยัก 2',
+        'DTP+HB2': 'ดีทีพีตับอักเสบบี 2',
+        'DTP+HB3': 'ดีทีพีตับอักเสบบี 3',
+        'DTP3': 'คอตีบไอกรนบาดทะยัก 3',
+        'DTP+HB+Hib3': 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 3',
+        'DTP-HB-Hib3': 'คอตีบไอกรนบาดทะยักตับอักเสบบีฮิบ 3',
+        'OPV3': 'โปลิโอ 3',
+        'DTP+Hib3': 'DTP+Hib3',
+        'DTP+IPV3': 'DTP+IPV3',
+        'DTP+IPV+Hib3': 'DTP+IPV+Hib3',
+        'DTP+IPV+HB+Hib3': 'DTP+IPV+HB+Hib3',
+        'Rotateq3': 'โรต้า 3-3',
+        'MMR1': 'หัด คางทูม หัดเยอรมัน เข็ม 1',
+        'LJE1': 'ไข้สมองอักเสบเจอีเชื้อเป็น 1',
+        'JE1': 'ไข้สมองอักเสบเจอี เข็มที่ 1',
+        'MMR2': 'หัด คางทูม หัดเยอรมัน เข็ม 2',
+        'DTP4': 'คอตีบไอกรนบาดทะยัก กระตุ้น 1',
+        'OPV4': 'โปลิโอ กระตุ้น 1',
+        'DTP+HB+Hib4': 'DTP+HB+Hib4',
+        'DTP+Hib4': 'DTP+Hib4',
+        'DTP+IPV4': 'DTP+IPV4',
+        'DTP+IPV+Hib4': 'DTP+IPV+Hib4',
+        'DTP+IPV+HB+Hib4': 'DTP+IPV+HB+Hib4',
+        'LJE2': 'ไข้สมองอักเสบเจอีเชื้อเป็น 2',
+        'JE2': 'ไข้สมองอักเสบเจอี เข็มที่ 2',
+        'DTP5': 'คอตีบไอกรนบาดทะยัก กระตุ้น 2',
+        'DTP+IPV5': 'DTP+IPV5',
+        'DTP+IPV+Hib5': 'DTP+IPV+Hib5',
+        'DTP+IPV+HB+Hib5': 'DTP+IPV+HB+Hib5',
+        'OPV5': 'โปลิโอ กระตุ้น 2',
+        'PCV': 'วัคซีนนิวโมค็อกคัส (PCV)',
+        'PCV1': 'วัคซีนนิวโมค็อกคัส เข็ม 1 (PCV1)',
+        'PCV2': 'วัคซีนนิวโมค็อกคัส เข็ม 2 (PCV2)',
+        'PCV3': 'วัคซีนนิวโมค็อกคัส เข็ม 3 (PCV3)',
         'FLU': 'วัคซีนไข้หวัดใหญ่ตามฤดูกาล'
     };
 
     function lookupThaiVaccineName(code) {
         if (!code) return '';
         const c = String(code).trim();
+        const cUpper = c.toUpperCase();
+        const cNorm = cUpper.replace(/[\s\-_+]/g, '');
+
+        // 1. ค้นหาจาก APP.vaccineCatalog (ดึงจากฟิลด์ name ตามตาราง vaccine_catalog)
         if (APP.vaccineCatalog && Array.isArray(APP.vaccineCatalog)) {
-            const found = APP.vaccineCatalog.find(v => v.code && v.code.toUpperCase() === c.toUpperCase());
+            let found = APP.vaccineCatalog.find(v => v.code && v.code.toUpperCase() === cUpper);
+            if (found && found.name) return found.name;
+            found = APP.vaccineCatalog.find(v => v.code && v.code.toUpperCase().replace(/[\s\-_+]/g, '') === cNorm);
             if (found && found.name) return found.name;
         }
-        return THAI_VACCINE_CATALOG_FALLBACK[c] || THAI_VACCINE_CATALOG_FALLBACK[c.toUpperCase()] || c;
+
+        // 2. ค้นหาจาก DEFAULT_VACCINE_CATALOG
+        if (typeof DEFAULT_VACCINE_CATALOG !== 'undefined' && Array.isArray(DEFAULT_VACCINE_CATALOG)) {
+            let found = DEFAULT_VACCINE_CATALOG.find(v => v.code && v.code.toUpperCase() === cUpper);
+            if (found && found.name) return found.name;
+            found = DEFAULT_VACCINE_CATALOG.find(v => v.code && v.code.toUpperCase().replace(/[\s\-_+]/g, '') === cNorm);
+            if (found && found.name) return found.name;
+        }
+
+        // 3. Fallback Dictionary ตามมาตรฐาน สธ.
+        return THAI_VACCINE_CATALOG_FALLBACK[c] || 
+               THAI_VACCINE_CATALOG_FALLBACK[cUpper] || 
+               THAI_VACCINE_CATALOG_FALLBACK[cNorm] || 
+               c;
     }
 
     function formatThaiCID(cid) {
@@ -26083,11 +26210,11 @@ async function loadDtpReportPage() {
                     <i class="fas fa-syringe" style="color:#dc2626;"></i> จำแนกเด็กขาดวัคซีนคอตีบไอกรนแยกรายเข็ม (คน):
                 </div>
                 <div id="dtpDoseBreakdown" style="display:flex; flex-wrap:wrap; gap:8px;">
-                    <span style="background:#fee2e2; color:#b91c1c; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600;">DTP1: <strong id="dtpDose1Count">0</strong></span>
-                    <span style="background:#ffedd5; color:#c2410c; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600;">DTP2: <strong id="dtpDose2Count">0</strong></span>
-                    <span style="background:#fef9c3; color:#a16207; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600;">DTP3: <strong id="dtpDose3Count">0</strong></span>
-                    <span style="background:#ede9fe; color:#6d28d9; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600;">DTP4: <strong id="dtpDose4Count">0</strong></span>
-                    <span style="background:#e0f2fe; color:#0369a1; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600;">DTP5: <strong id="dtpDose5Count">0</strong></span>
+                    <span style="background:#fee2e2; color:#b91c1c; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;" onclick="quickFilterDtpMissed('DTP1')" title="คลิกเพื่อเลือก/ยกเลิกกรอง DTP1">DTP1: <strong id="dtpDose1Count">0</strong></span>
+                    <span style="background:#ffedd5; color:#c2410c; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;" onclick="quickFilterDtpMissed('DTP2')" title="คลิกเพื่อเลือก/ยกเลิกกรอง DTP2">DTP2: <strong id="dtpDose2Count">0</strong></span>
+                    <span style="background:#fef9c3; color:#a16207; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;" onclick="quickFilterDtpMissed('DTP3')" title="คลิกเพื่อเลือก/ยกเลิกกรอง DTP3">DTP3: <strong id="dtpDose3Count">0</strong></span>
+                    <span style="background:#ede9fe; color:#6d28d9; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;" onclick="quickFilterDtpMissed('DTP4')" title="คลิกเพื่อเลือก/ยกเลิกกรอง DTP4">DTP4: <strong id="dtpDose4Count">0</strong></span>
+                    <span style="background:#e0f2fe; color:#0369a1; padding:3px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;" onclick="quickFilterDtpMissed('DTP5')" title="คลิกเพื่อเลือก/ยกเลิกกรอง DTP5">DTP5: <strong id="dtpDose5Count">0</strong></span>
                 </div>
             </div>
 
@@ -26118,16 +26245,40 @@ async function loadDtpReportPage() {
                         <option value="not_due">ยังไม่ถึงเกณฑ์ (< 2 เดือน)</option>
                     </select>
                 </div>
-                <div class="filter-group" style="min-width:140px;">
-                    <label>กรองตามเข็มที่ขาด</label>
-                    <select id="dtpMissedDose">
-                        <option value="ทั้งหมด">-- ทุกเข็ม --</option>
-                        <option value="DTP1">ขาดเข็ม 1 (DTP-HB-Hib1)</option>
-                        <option value="DTP2">ขาดเข็ม 2 (DTP-HB-Hib2)</option>
-                        <option value="DTP3">ขาดเข็ม 3 (DTP-HB-Hib3)</option>
-                        <option value="DTP4">ขาดเข็ม 4 (DTP4)</option>
-                        <option value="DTP5">ขาดเข็ม 5 (DTP5)</option>
-                    </select>
+                <div class="filter-group" style="min-width:190px; position:relative;" id="dtpMissedDoseGroup">
+                    <label>กรองตามเข็มที่ขาด (เลือกได้ > 1 เข็ม)</label>
+                    <div id="dtpMissedDoseToggleBtn" onclick="toggleDtpMissedDoseMenu(event)" style="display:flex; justify-content:space-between; align-items:center; background:#fff; border:1px solid #cbd5e1; border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; min-height:38px; box-sizing:border-box;">
+                        <span id="dtpMissedDoseLabel" style="color:#0f172a; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px;">-- ทุกเข็ม --</span>
+                        <i class="fas fa-chevron-down" style="font-size:11px; color:#64748b; margin-left:8px; flex-shrink:0;"></i>
+                    </div>
+                    <div id="dtpMissedDoseMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:240px; background:#fff; border:1px solid #cbd5e1; border-radius:10px; box-shadow:0 10px 25px rgba(0,0,0,0.15); z-index:1050; padding:6px 0;">
+                        <label style="display:flex; align-items:center; gap:8px; padding:7px 14px; margin:0; cursor:pointer; font-weight:700; font-size:12.5px; color:#0f172a; border-bottom:1px solid #f1f5f9; background:#f8fafc;">
+                            <input type="checkbox" id="dtpMissedAllChk" checked onchange="handleDtpMissedAllChange(this)" style="cursor:pointer; width:15px; height:15px;">
+                            <span>-- ทุกเข็ม (ไม่จำกัด) --</span>
+                        </label>
+                        <div style="padding:4px 0;">
+                            <label style="display:flex; align-items:center; gap:8px; padding:6px 14px; margin:0; cursor:pointer; font-size:12.5px; color:#334155; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                <input type="checkbox" class="dtp-missed-chk" value="DTP1" onchange="handleDtpMissedItemChange()" style="cursor:pointer; width:15px; height:15px;">
+                                <span><span style="background:#fee2e2; color:#b91c1c; padding:1px 6px; border-radius:4px; font-weight:700; font-size:11px; margin-right:4px;">DTP1</span> ขาดเข็ม 1 (2 ด.)</span>
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; padding:6px 14px; margin:0; cursor:pointer; font-size:12.5px; color:#334155; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                <input type="checkbox" class="dtp-missed-chk" value="DTP2" onchange="handleDtpMissedItemChange()" style="cursor:pointer; width:15px; height:15px;">
+                                <span><span style="background:#ffedd5; color:#c2410c; padding:1px 6px; border-radius:4px; font-weight:700; font-size:11px; margin-right:4px;">DTP2</span> ขาดเข็ม 2 (4 ด.)</span>
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; padding:6px 14px; margin:0; cursor:pointer; font-size:12.5px; color:#334155; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                <input type="checkbox" class="dtp-missed-chk" value="DTP3" onchange="handleDtpMissedItemChange()" style="cursor:pointer; width:15px; height:15px;">
+                                <span><span style="background:#fef9c3; color:#a16207; padding:1px 6px; border-radius:4px; font-weight:700; font-size:11px; margin-right:4px;">DTP3</span> ขาดเข็ม 3 (6 ด.)</span>
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; padding:6px 14px; margin:0; cursor:pointer; font-size:12.5px; color:#334155; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                <input type="checkbox" class="dtp-missed-chk" value="DTP4" onchange="handleDtpMissedItemChange()" style="cursor:pointer; width:15px; height:15px;">
+                                <span><span style="background:#ede9fe; color:#6d28d9; padding:1px 6px; border-radius:4px; font-weight:700; font-size:11px; margin-right:4px;">DTP4</span> ขาดเข็ม 4 (18 ด.)</span>
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; padding:6px 14px; margin:0; cursor:pointer; font-size:12.5px; color:#334155; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                                <input type="checkbox" class="dtp-missed-chk" value="DTP5" onchange="handleDtpMissedItemChange()" style="cursor:pointer; width:15px; height:15px;">
+                                <span><span style="background:#e0f2fe; color:#0369a1; padding:1px 6px; border-radius:4px; font-weight:700; font-size:11px; margin-right:4px;">DTP5</span> ขาดเข็ม 5 (4 ปี)</span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 <div class="filter-group" style="min-width:180px;">
                     <label><i class="fas fa-school" style="color:#2563eb;"></i> โรงเรียน / ศพด.</label>
@@ -26221,8 +26372,8 @@ async function loadDtpReportPage() {
         document.getElementById('dtpVillage').addEventListener('change', filterAndDisplayDtpTable);
         const dtpSchEl = document.getElementById('dtpSchool'); if (dtpSchEl) dtpSchEl.addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpStatus').addEventListener('change', filterAndDisplayDtpTable);
-        document.getElementById('dtpMissedDose').addEventListener('change', filterAndDisplayDtpTable);
-        if (document.getElementById('dtpSchool')) document.getElementById('dtpSchool').addEventListener('change', filterAndDisplayDtpTable);
+        const dtpMissedEl = document.getElementById('dtpMissedDose');
+        if (dtpMissedEl) dtpMissedEl.addEventListener('change', filterAndDisplayDtpTable);
         document.getElementById('dtpSearch').addEventListener('input', debounce(filterAndDisplayDtpTable, 300));
         const dtpProcBtn = document.getElementById('dtpProcessBtn');
         if (dtpProcBtn) dtpProcBtn.addEventListener('click', () => fetchAndRenderDtpData(true));
@@ -26415,12 +26566,94 @@ function updateDtpStats(list) {
     setHtml('dtpDose5Count', d5Count);
 }
 
+// ฟังก์ชันควบคุมตัวกรองเข็มที่ขาดแบบหลายเข็ม (Multi-select DTP Missed Doses)
+window.toggleDtpMissedDoseMenu = function(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('dtpMissedDoseMenu');
+    if (!menu) return;
+    const isShowing = menu.style.display === 'block';
+    menu.style.display = isShowing ? 'none' : 'block';
+};
+
+window.handleDtpMissedAllChange = function(allChk) {
+    const chks = document.querySelectorAll('.dtp-missed-chk');
+    chks.forEach(c => c.checked = false);
+    updateDtpMissedLabelAndFilter();
+};
+
+window.handleDtpMissedItemChange = function() {
+    const chks = document.querySelectorAll('.dtp-missed-chk:checked');
+    const allChk = document.getElementById('dtpMissedAllChk');
+    if (chks.length === 0) {
+        if (allChk) allChk.checked = true;
+    } else {
+        if (allChk) allChk.checked = false;
+    }
+    updateDtpMissedLabelAndFilter();
+};
+
+window.quickFilterDtpMissed = function(doseCode) {
+    const allChk = document.getElementById('dtpMissedAllChk');
+    const targetChk = document.querySelector(`.dtp-missed-chk[value="${doseCode}"]`);
+    if (!targetChk) return;
+    
+    // Toggle เข็มที่เลือก
+    targetChk.checked = !targetChk.checked;
+    const anyChecked = document.querySelectorAll('.dtp-missed-chk:checked').length > 0;
+    if (allChk) allChk.checked = !anyChecked;
+    updateDtpMissedLabelAndFilter();
+};
+
+window.getDtpSelectedMissedDoses = function() {
+    const allChk = document.getElementById('dtpMissedAllChk');
+    if (allChk && allChk.checked) return [];
+    const chks = document.querySelectorAll('.dtp-missed-chk:checked');
+    return Array.from(chks).map(c => c.value);
+};
+
+function updateDtpMissedLabelAndFilter() {
+    const selected = (typeof window.getDtpSelectedMissedDoses === 'function') ? window.getDtpSelectedMissedDoses() : [];
+    const label = document.getElementById('dtpMissedDoseLabel');
+    if (label) {
+        if (selected.length === 0) {
+            label.textContent = '-- ทุกเข็ม --';
+            label.style.color = '#0f172a';
+            label.style.fontWeight = '500';
+        } else if (selected.length <= 2) {
+            label.textContent = selected.join(', ');
+            label.style.color = '#dc2626';
+            label.style.fontWeight = '700';
+        } else {
+            label.textContent = `เลือก ${selected.length} เข็ม (${selected.join(', ')})`;
+            label.style.color = '#dc2626';
+            label.style.fontWeight = '700';
+        }
+    }
+    filterAndDisplayDtpTable();
+}
+
+// ปิดเมนูเมื่อคลิกพื้นที่อื่น
+document.addEventListener('click', function(e) {
+    const grp = document.getElementById('dtpMissedDoseGroup');
+    const menu = document.getElementById('dtpMissedDoseMenu');
+    if (menu && menu.style.display === 'block') {
+        if (!grp || !grp.contains(e.target)) {
+            menu.style.display = 'none';
+        }
+    }
+});
+
 function filterAndDisplayDtpTable() {
     const statusVal = document.getElementById('dtpStatus') ? document.getElementById('dtpStatus').value : 'missed';
     const villageVal = document.getElementById('dtpVillage') ? document.getElementById('dtpVillage').value : 'ทั้งหมด';
-    const missedDoseVal = document.getElementById('dtpMissedDose') ? document.getElementById('dtpMissedDose').value : 'ทั้งหมด';
     const schoolVal = document.getElementById('dtpSchool') ? document.getElementById('dtpSchool').value : 'ทั้งหมด';
     const searchVal = document.getElementById('dtpSearch') ? document.getElementById('dtpSearch').value.toLowerCase().trim() : '';
+
+    // กรองตามเข็มที่ขาด (รองรับการเลือกมากกว่า 1 เข็ม)
+    const selectedMissedDoses = (typeof window.getDtpSelectedMissedDoses === 'function') 
+        ? window.getDtpSelectedMissedDoses() 
+        : [];
+    const legacyMissedVal = document.getElementById('dtpMissedDose') ? document.getElementById('dtpMissedDose').value : 'ทั้งหมด';
 
     window.DTP_FILTERED_CHILDREN = window.DTP_RAW_CHILDREN.filter(c => {
         // กรองตามหมู่บ้าน
@@ -26444,9 +26677,11 @@ function filterAndDisplayDtpTable() {
             }
         }
 
-        // กรองตามเข็มที่ขาด
-        if (missedDoseVal !== 'ทั้งหมด') {
-            if (!c.missedDoses || !c.missedDoses.includes(missedDoseVal)) return false;
+        // กรองตามเข็มที่ขาด (เลือกได้มากกว่า 1 เข็ม)
+        if (selectedMissedDoses.length > 0) {
+            if (!c.missedDoses || !selectedMissedDoses.some(d => c.missedDoses.includes(d))) return false;
+        } else if (legacyMissedVal && legacyMissedVal !== 'ทั้งหมด') {
+            if (!c.missedDoses || !c.missedDoses.includes(legacyMissedVal)) return false;
         }
 
         // กรองคำค้นหา
@@ -26555,6 +26790,7 @@ function renderDtpTargetTable() {
                 <td style="padding:10px 12px; font-size:12px; color:#475569;">
                     <div>${esc(c.houseNumber ? 'บ.' + c.houseNumber : '')} ${esc(c.village ? 'ม.' + c.village : '')} ${esc(c.subdistrict ? 'ต.' + c.subdistrict : '')}</div>
                     ${c.phone && c.phone !== '-' ? `<div style="font-size:11px; color:#0284c7;"><i class="fas fa-phone-alt" style="font-size:9px;"></i> ${esc(c.phone)}</div>` : ''}
+                    ${c.asm && c.asm !== '-' && c.asm !== '0' ? `<div style="font-size:11px; color:#059669; margin-top:2px;"><i class="fas fa-user-nurse" style="font-size:9px;"></i> อสม: ${esc(c.asm)}</div>` : ''}
                 </td>
                 <td style="padding:10px 12px; font-size:12px; vertical-align:middle; white-space:nowrap;">
                     ${(c.school && c.school !== '-' && c.school !== 'ไม่ระบุ') ? `
@@ -26624,8 +26860,10 @@ window.openDtpPrintModalForChild = function(cidOrHn) {
     if (!cidOrHn) return;
     const child = (window.DTP_FILTERED_CHILDREN || []).find(x => x.cid === cidOrHn || x.hn === cidOrHn || x.id === cidOrHn);
     if (child && typeof ensureMiniSlipModal === 'function') {
-        const firstMissed = (child.missedDoses && child.missedDoses.length > 0) ? child.missedDoses[0] : 'DTP';
-        let vacName = 'วัคซีนคอตีบ (' + firstMissed + ') - เร่งรัดติดตาม';
+        const missedList = (child.missedDoses && child.missedDoses.length > 0) ? child.missedDoses : ['DTP'];
+        const missedCodesStr = missedList.join(', ');
+        const firstMissed = missedList[0];
+        const vacName = lookupThaiVaccineName(firstMissed) || ('วัคซีนคอตีบ (' + firstMissed + ') - เร่งรัดติดตาม');
         
         ensureMiniSlipModal();
         const facName = (typeof getFacilityDisplayName === 'function') ? getFacilityDisplayName(child.hcode, child.hname || 'คลินิกเด็กดี') : (child.hname || 'คลินิกเด็กดี');
@@ -26640,7 +26878,7 @@ window.openDtpPrintModalForChild = function(cidOrHn) {
             village: child.village || '-',
             phone: child.phone || '-',
             apptDate: 'ใบนัดด่วน(พื้นที่ระบาด)',
-            vacCode: firstMissed,
+            vacCode: missedCodesStr,
             vacName: vacName,
             cid: child.cid || cidOrHn
         };
@@ -26724,7 +26962,7 @@ function exportDtpExcel() {
             [
                 '#', 'รหัสสถานพยาบาล', 'สถานพยาบาล', 'เลขประจำตัวประชาชน (CID)', 'HN', 'ชื่อ-สกุล',
                 'โรงเรียน / ศพด.', 'ว/ด/ปเกิด', 'อายุปัจจุบัน', 'อายุ (เดือน)', 'ประเภทเด็ก', 'บ้านเลขที่', 'หมู่ที่',
-                'ตำบล', 'เบอร์โทรศัพท์', 'DTP1 (2ด.)', 'DTP2 (4ด.)', 'DTP3 (6ด.)', 'DTP4 (18ด.)',
+                'ตำบล', 'เบอร์โทรศัพท์', 'อสม.ผู้รับผิดชอบ', 'DTP1 (2ด.)', 'DTP2 (4ด.)', 'DTP3 (6ด.)', 'DTP4 (18ด.)',
                 'DTP5 (4ปี)', 'เข็มที่ขาด/ต้องฉีดเร่งรัด', 'สถานะการประเมิน'
             ]
         ];
@@ -26748,6 +26986,7 @@ function exportDtpExcel() {
                 c.village || '',
                 c.subdistrict || '',
                 c.phone || '',
+                c.asm && c.asm !== '-' ? c.asm : 'ไม่ระบุ',
                 c.dtp1 && c.dtp1.given ? c.dtp1.date : (c.dtp1 && c.dtp1.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
                 c.dtp2 && c.dtp2.given ? c.dtp2.date : (c.dtp2 && c.dtp2.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
                 c.dtp3 && c.dtp3.given ? c.dtp3.date : (c.dtp3 && c.dtp3.isDue ? 'ขาด' : 'ยังไม่ถึงเกณฑ์'),
@@ -26760,9 +26999,9 @@ function exportDtpExcel() {
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
         ws['!merges'] = [
-            { s: { r: 0, c: 0 }, e: { r: 0, c: 21 } },
-            { s: { r: 1, c: 0 }, e: { r: 1, c: 21 } },
-            { s: { r: 2, c: 0 }, e: { r: 2, c: 21 } }
+            { s: { r: 0, c: 0 }, e: { r: 0, c: 22 } },
+            { s: { r: 1, c: 0 }, e: { r: 1, c: 22 } },
+            { s: { r: 2, c: 0 }, e: { r: 2, c: 22 } }
         ];
         ws['!cols'] = [
             { wch: 6 },   // #
@@ -26780,6 +27019,7 @@ function exportDtpExcel() {
             { wch: 8 },   // หมู่
             { wch: 16 },  // ตำบล
             { wch: 16 },  // โทรศัพท์
+            { wch: 22 },  // อสม.ผู้รับผิดชอบ
             { wch: 14 },  // DTP1
             { wch: 14 },  // DTP2
             { wch: 14 },  // DTP3
@@ -26833,6 +27073,7 @@ function printDtpOutreachSheet() {
     const rowsHtml = window.DTP_FILTERED_CHILDREN.map((c, idx) => {
         const facName = (typeof getFacilityDisplayName === 'function') ? getFacilityDisplayName(c.hcode, c.hname) : (c.hname || c.hcode);
         const missedStr = (c.missedDoses && c.missedDoses.length > 0) ? c.missedDoses.join(', ') : 'ครบ';
+        const vhvName = (c.asm && c.asm !== '-' && c.asm !== '0') ? c.asm : '-';
         return `
             <tr>
                 <td style="text-align:center; padding:6px 4px; border:1px solid #333;">${idx + 1}</td>
@@ -26846,6 +27087,9 @@ function printDtpOutreachSheet() {
                     บ.${esc(c.houseNumber || '-')} ม.${esc(c.village || '-')} ต.${esc(c.subdistrict || '-')}<br>
                     ${c.school && c.school !== '-' ? '<span style="color:#1d4ed8; font-weight:600;"><i class="fas fa-school"></i> ' + esc(c.school) + '</span><br>' : ''}
                     โทร: <strong>${esc(c.phone || '-')}</strong>
+                </td>
+                <td style="padding:6px 6px; border:1px solid #333; font-size:11px; text-align:center;">
+                    <strong>${esc(vhvName)}</strong>
                 </td>
                 <td style="padding:6px 6px; border:1px solid #333; font-size:11px;">
                     ${esc(facName)}
@@ -26874,7 +27118,7 @@ function printDtpOutreachSheet() {
         <html>
         <head>
             <meta charset="utf-8">
-            <title>แบบฟอร์มติดตามเด็กขาดวัคซีนคอตีบลงพื้นที่ (เคาะประตูบ้าน / อสม.)</title>
+            <title>แบบฟอร์มติดตามเด็กขาดวัคซีนคอตีบไอกรนในพื้นที่(เคาะประตูบ้าน /อสม./เจ้าหน้าที่)</title>
             <style>
                 @page { size: A4 landscape; margin: 10mm; }
                 body { font-family: 'Sarabun', 'TH Sarabun New', sans-serif; font-size: 11pt; color: #000; margin: 0; padding: 10px; }
@@ -26887,7 +27131,7 @@ function printDtpOutreachSheet() {
             </style>
         </head>
         <body onload="window.print()">
-            <div class="header-title">แบบฟอร์มติดตามเด็กขาดวัคซีนคอตีบลงพื้นที่ (เคาะประตูบ้าน / อสม. / เจ้าหน้าที่)</div>
+            <div class="header-title">แบบฟอร์มติดตามเด็กขาดวัคซีนคอตีบไอกรนในพื้นที่(เคาะประตูบ้าน /อสม./เจ้าหน้าที่)</div>
             <div class="header-sub">
                 พื้นที่ระบาดโรคคอตีบ อำเภอเทพา จังหวัดสงขลา | ตามแผนงานสร้างเสริมภูมิคุ้มกันโรค สธ. ปี 2569<br>
                 <strong>หมู่บ้าน:</strong> ${esc(villageText)} | <strong>วันที่พิมพ์:</strong> ${thaiDateStr} | <strong>จำนวนเป้าหมาย:</strong> ${window.DTP_FILTERED_CHILDREN.length} คน
@@ -26895,15 +27139,16 @@ function printDtpOutreachSheet() {
             <table>
                 <thead>
                     <tr>
-                        <th style="width:30px;">#</th>
-                        <th style="width:160px;">ชื่อ-สกุล เด็ก / เลขบัตร</th>
-                        <th style="width:75px;">อายุ</th>
-                        <th style="width:160px;">ที่อยู่ / เบอร์โทร</th>
-                        <th style="width:130px;">สถานพยาบาล</th>
-                        <th style="width:110px;">เข็มที่ต้องฉีดเร่งรัด</th>
-                        <th style="width:180px;">ผลการติดตามลงพื้นที่</th>
-                        <th style="width:100px;">วันนัดหมายใหม่</th>
-                        <th style="width:110px;">ลายมือชื่อผู้ติดตาม</th>
+                        <th style="width:28px;">#</th>
+                        <th style="width:150px;">ชื่อ-สกุล เด็ก / เลขบัตร</th>
+                        <th style="width:65px;">อายุ</th>
+                        <th style="width:145px;">ที่อยู่ / เบอร์โทร</th>
+                        <th style="width:115px;">ชื่อ อสม. ที่รับผิดชอบ</th>
+                        <th style="width:115px;">สถานพยาบาล</th>
+                        <th style="width:105px;">เข็มที่ต้องฉีดเร่งรัด</th>
+                        <th style="width:175px;">ผลการติดตามลงพื้นที่</th>
+                        <th style="width:90px;">วันนัดหมายใหม่</th>
+                        <th style="width:100px;">ลายมือชื่อผู้ติดตาม</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -26916,8 +27161,7 @@ function printDtpOutreachSheet() {
             </div>
         </body>
         </html>
-
-`);
+    `);
     printWin.document.close();
 }
 
