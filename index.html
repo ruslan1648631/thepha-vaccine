@@ -26334,20 +26334,73 @@ async function openTrackFoundChildModal(childIndex) {
     });
 }
 
-// ➕ Modal เพิ่มรายชื่อเด็กใหม่ที่พบในพื้นที่ (เด็กตกสำรวจ/ไม่มีในระบบ)
-async function openRegisterNewFoundChildModal(prefilledName) {
-    const myHcode = (APP.currentUser && APP.currentUser.hcode) ? APP.currentUser.hcode : '00860';
-    const villages = await getOfficerVillagesForFacility(myHcode);
-    let vilOpts = '<option value="">-- เลือกหมู่บ้านที่พบเด็ก --</option>';
-    (villages || []).forEach(v => {
-        vilOpts += `<option value="${esc(v.name)}">${esc(v.name)}</option>`;
-    });
+// ➕ ฟังก์ชันเปลี่ยน รพ.สต. เพื่อโหลดหมู่บ้านตามพื้นที่รับผิดชอบ
+window.onNfcFacilityChange = async function(hcode) {
+    const vilSelect = document.getElementById('nfcVillage');
+    if (!vilSelect) return;
+    vilSelect.innerHTML = '<option value="">⏳ กำลังโหลดหมู่บ้าน...</option>';
+    try {
+        const vList = await getOfficerVillagesForFacility(hcode);
+        let opts = '<option value="">-- เลือกหมู่ที่ / หมู่บ้าน --</option>';
+        if (vList && vList.length > 0) {
+            vList.forEach(v => {
+                const mooVal = String(v.no || '').replace(/\D/g, '') || '0';
+                const rawName = String(v.rawName || v.name || '').trim();
+                opts += `<option value="${esc(mooVal)}|${esc(rawName)}">${esc(v.name)}</option>`;
+            });
+        } else {
+            opts += '<option value="0|นอกเขต">นอกเขต / ไม่ระบุหมู่</option>';
+        }
+        vilSelect.innerHTML = opts;
+    } catch (e) {
+        console.warn('onNfcFacilityChange error:', e);
+        vilSelect.innerHTML = '<option value="">โหลดหมู่บ้านไม่สำเร็จ</option>';
+    }
+};
 
-    const vaccineCatalog = APP.vaccineCatalog || [];
-    let vacOpts = '<option value="ทั่วไป">ทั่วไป (ตรวจประเมิน/ติดตามวัคซีน)</option>';
-    vaccineCatalog.forEach(v => {
-        vacOpts += `<option value="${esc(v.code)}">${esc(v.name)} (${esc(v.code)})</option>`;
-    });
+// ➕ Modal เพิ่มรายชื่อเด็กใหม่ที่พบในพื้นที่ (เด็กตกสำรวจ/ไม่มีในระบบ) บันทึกเข้าตาราง data
+async function openRegisterNewFoundChildModal(prefilledName) {
+    const isAmpur = (typeof isAdminAmpurUser === 'function' && isAdminAmpurUser()) || (typeof isSpecialOfficerUser === 'function' && isSpecialOfficerUser());
+    const userRole = (APP.currentUser && APP.currentUser.role) ? APP.currentUser.role : 'เจ้าหน้าที่';
+    const rawUserHc = (APP.currentUser && APP.currentUser.hcode) ? String(APP.currentUser.hcode).trim() : '00860';
+    const userHcode = rawUserHc.padStart(5, '0');
+    const userVillage = (APP.currentUser && APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village.trim() : '';
+    const isVHV = (userRole === 'อสม.' || userRole === 'VHV' || (!isAmpur && typeof isAdminHOSUser === 'function' && !isAdminHOSUser() && userRole !== 'เจ้าหน้าที่'));
+
+    // รายการสถานพยาบาลตามสิทธิ์และพื้นที่รับผิดชอบ
+    let facilityList = [];
+    if (isAmpur) {
+        facilityList = Object.keys(HEALTH_FACILITIES).map(code => ({
+            code: String(code).padStart(5, '0'),
+            name: HEALTH_FACILITIES[code]
+        }));
+    } else {
+        const myName = HEALTH_FACILITIES[userHcode] || HEALTH_FACILITIES[rawUserHc] || getFacilityDisplayName(userHcode) || `รพ.สต. (${userHcode})`;
+        facilityList = [{ code: userHcode, name: myName }];
+    }
+
+    const defaultHcode = facilityList.some(f => f.code === userHcode) ? userHcode : (facilityList[0] ? facilityList[0].code : '09496');
+
+    // โหลดหมู่บ้านเริ่มต้นของสถานพยาบาลนี้
+    let initialVilOpts = '<option value="">⏳ กำลังโหลดหมู่บ้าน...</option>';
+    try {
+        const vInit = await getOfficerVillagesForFacility(defaultHcode);
+        if (vInit && vInit.length > 0) {
+            initialVilOpts = '<option value="">-- เลือกหมู่ที่ / หมู่บ้านที่พบเด็ก --</option>';
+            vInit.forEach(v => {
+                const mooVal = String(v.no || '').replace(/\D/g, '') || '0';
+                const rawName = String(v.rawName || v.name || '').trim();
+                const isSelected = (isVHV && userVillage && (rawName.includes(userVillage) || userVillage.includes(rawName))) ? 'selected' : '';
+                initialVilOpts += `<option value="${esc(mooVal)}|${esc(rawName)}" ${isSelected}>${esc(v.name)}</option>`;
+            });
+        } else {
+            initialVilOpts = '<option value="0|นอกเขต">นอกเขต / ไม่ระบุหมู่</option>';
+        }
+    } catch(e) {}
+
+    const facOpts = facilityList.map(f => 
+        `<option value="${esc(f.code)}" ${f.code === defaultHcode ? 'selected' : ''}>${esc(f.name)} (${esc(f.code)})</option>`
+    ).join('');
 
     const todayStr = new Date().toISOString().slice(0, 10);
     const defaultName = (typeof prefilledName === 'string' && isNaN(prefilledName)) ? prefilledName : '';
@@ -26356,9 +26409,30 @@ async function openRegisterNewFoundChildModal(prefilledName) {
     const htmlContent = `
         <div style="font-family:'Kanit',sans-serif; text-align:left; font-size:13.5px; color:#1e293b;">
             <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:12.5px; color:#065f46;">
-                <i class="fas fa-info-circle"></i> แบบฟอร์มบันทึกเด็กที่พบในพื้นที่ (เคาะประตูบ้าน) ซึ่งยังไม่มีรายชื่อในระบบ หรือเป็นเด็กตกสำรวจ ย้ายเข้ามาใหม่
+                <i class="fas fa-database" style="color:#059669;"></i> <b>บันทึกข้อมูลเข้าสู่ฐานข้อมูลหลัก (ตาราง data)</b> พร้อมลงบันทึกการติดตามอัตโนมัติ
             </div>
             <div style="display:flex; flex-direction:column; gap:10px;">
+                <!-- แถว 1: รพ.สต. และ หมู่ที่ ตามพื้นที่รับผิดชอบ -->
+                <div style="display:grid; grid-template-columns:1.2fr 1fr; gap:10px; background:#f0f9ff; padding:10px; border-radius:8px; border:1.5px solid #bae6fd;">
+                    <div>
+                        <label style="font-weight:700; display:block; margin-bottom:3px; color:#0369a1;">
+                            <i class="fas fa-hospital"></i> รพ.สต. ที่รับผิดชอบ <span style="color:#dc2626;">*</span>
+                        </label>
+                        <select id="nfcFacility" onchange="window.onNfcFacilityChange(this.value)" ${(!isAmpur && facilityList.length <= 1) ? 'disabled style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #cbd5e1; font-family:\'Kanit\'; font-size:13px; background:#f1f5f9; cursor:not-allowed;"' : 'style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #38bdf8; font-family:\'Kanit\'; font-size:13px; background:white; font-weight:600;"'}>
+                            ${facOpts}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight:700; display:block; margin-bottom:3px; color:#0369a1;">
+                            <i class="fas fa-map-marker-alt"></i> หมู่ที่ / หมู่บ้าน <span style="color:#dc2626;">*</span>
+                        </label>
+                        <select id="nfcVillage" style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #38bdf8; font-family:'Kanit'; font-size:13px; background:white;">
+                            ${initialVilOpts}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- แถว 2: ชื่อเด็ก และ เลขบัตรประชาชน -->
                 <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:10px;">
                     <div>
                         <label style="font-weight:600; display:block; margin-bottom:3px;">ชื่อ - สกุล เด็ก <span style="color:#dc2626;">*</span></label>
@@ -26369,6 +26443,8 @@ async function openRegisterNewFoundChildModal(prefilledName) {
                         <input type="text" id="nfcCid" value="${esc(defaultCid)}" maxlength="13" placeholder="13 หลัก (ถ้ามี)" style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
                     </div>
                 </div>
+
+                <!-- แถว 3: วันเกิด และ อายุ -->
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                     <div>
                         <label style="font-weight:600; display:block; margin-bottom:3px;">วัน/เดือน/ปี เกิด</label>
@@ -26379,21 +26455,23 @@ async function openRegisterNewFoundChildModal(prefilledName) {
                         <input type="text" id="nfcAge" placeholder="เช่น 1 ปี 4 เดือน" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
                     </div>
                 </div>
+
+                <!-- แถว 4: บ้านเลขที่ และ เลข HN -->
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                    <div>
-                        <label style="font-weight:600; display:block; margin-bottom:3px;">หมู่บ้านที่พบ <span style="color:#dc2626;">*</span></label>
-                        <select id="nfcVillage" style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
-                            ${vilOpts}
-                        </select>
-                    </div>
                     <div>
                         <label style="font-weight:600; display:block; margin-bottom:3px;">บ้านเลขที่</label>
                         <input type="text" id="nfcHouse" placeholder="เช่น 24/1" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
                     </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">เลข HN ในพื้นที่ (ถ้ามี)</label>
+                        <input type="text" id="nfcHn" placeholder="HN (ถ้าทราบ)" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
                 </div>
+
+                <!-- แถว 5: ผู้ปกครอง และ เบอร์โทรศัพท์ -->
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                     <div>
-                        <label style="font-weight:600; display:block; margin-bottom:3px;">ชื่อผู้ปกครอง</label>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">ชื่อผู้ปกครอง (บิดา/มารดา)</label>
                         <input type="text" id="nfcParent" placeholder="บิดา/มารดา/ผู้ดูแล" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
                     </div>
                     <div>
@@ -26401,20 +26479,34 @@ async function openRegisterNewFoundChildModal(prefilledName) {
                         <input type="tel" id="nfcPhone" placeholder="08xxxxxxxx" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
                     </div>
                 </div>
-                <div>
-                    <label style="font-weight:600; display:block; margin-bottom:3px;">ผลการติดตามครั้งแรก <span style="color:#dc2626;">*</span></label>
-                    <select id="nfcStatus" style="width:100%; padding:8px 10px; border-radius:6px; border:2px solid #10b981; font-family:'Kanit'; font-size:13.5px; font-weight:600; color:#047857;">
-                        <option value="ฉีดแล้วที่อื่น">✅ ฉีดแล้วที่อื่น (มีประวัติฉีดที่ รพ./คลินิกอื่น)</option>
-                        <option value="นัดมา รพ.สต.">📅 นัดมารับวัคซีนที่ รพ.สต.</option>
-                        <option value="ย้ายที่อยู่">🚚 ย้ายเข้ามาอยู่ในพื้นที่</option>
-                        <option value="ปฏิเสธ">❌ ปฏิเสธการรับวัคซีน</option>
-                        <option value="ตามนัดปกติ">ตามนัดปกติ</option>
-                        <option value="ขาดนัด">ขาดนัดวัคซีน</option>
-                    </select>
+
+                <!-- แถว 6: ประเภทการอยู่อาศัย (Type Area) และ ผลติดตาม -->
+                <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:10px;">
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">ประเภทเด็ก (Type Area)</label>
+                        <select id="nfcType" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                            <option value="2" selected>Type 2 (เด็กนอกเขต/พบในพื้นที่)</option>
+                            <option value="1">Type 1 (เด็กในเขตมีชื่อในทะเบียนบ้าน)</option>
+                            <option value="3">Type 3 (เด็กมาอาศัยในเขต)</option>
+                            <option value="4">Type 4 (เด็กนอกเขตอื่น)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">ผลการติดตามครั้งแรก <span style="color:#dc2626;">*</span></label>
+                        <select id="nfcStatus" style="width:100%; padding:8px 10px; border-radius:6px; border:2px solid #10b981; font-family:'Kanit'; font-size:13px; font-weight:600; color:#047857;">
+                            <option value="ฉีดแล้วที่อื่น">✅ ฉีดแล้วที่อื่น (มีประวัติฉีดที่ รพ./คลินิกอื่น)</option>
+                            <option value="นัดมา รพ.สต.">📅 นัดมารับวัคซีนที่ รพ.สต.</option>
+                            <option value="ย้ายที่อยู่">🚚 ย้ายเข้ามาอยู่ในพื้นที่</option>
+                            <option value="ปฏิเสธ">❌ ปฏิเสธการรับวัคซีน</option>
+                            <option value="ตามนัดปกติ">ตามนัดปกติ</option>
+                            <option value="ขาดนัด">ขาดนัดวัคซีน</option>
+                        </select>
+                    </div>
                 </div>
+
                 <div>
                     <label style="font-weight:600; display:block; margin-bottom:3px;">หมายเหตุ / ข้อมูลเพิ่มเติม</label>
-                    <textarea id="nfcRemarks" rows="2" placeholder="เช่น ย้ายมาจากจังหวัดอื่น, ไม่มีสมุดวัคซีน, พบระหว่างลงพื้นที่..." style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;"></textarea>
+                    <textarea id="nfcRemarks" rows="2" placeholder="เช่น ย้ายมาจากจังหวัดอื่น, ไม่มีสมุดวัคซีน, พบระหว่างลงพื้นที่เคาะประตูบ้าน..." style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;"></textarea>
                 </div>
                 <div>
                     <label style="font-weight:600; display:block; margin-bottom:3px;">พิกัด GPS บ้านเด็ก</label>
@@ -26430,92 +26522,150 @@ async function openRegisterNewFoundChildModal(prefilledName) {
     `;
 
     Swal.fire({
-        title: '➕ เพิ่มเด็กใหม่ที่พบในพื้นที่ (ไม่มีในระบบ)',
+        title: '➕ เพิ่มเด็กใหม่ที่พบในพื้นที่ (บันทึกลงตาราง data)',
         html: htmlContent,
         showCancelButton: true,
-        confirmButtonText: '<i class="fas fa-save"></i> บันทึกข้อมูลเด็ก',
+        confirmButtonText: '<i class="fas fa-save"></i> บันทึกข้อมูลเข้าตาราง data',
         cancelButtonText: 'ยกเลิก',
         confirmButtonColor: '#10b981',
-        width: '540px',
+        width: '560px',
+        didOpen: () => {
+            const facSelect = document.getElementById('nfcFacility');
+            if (facSelect && facSelect.value) {
+                const vilSelect = document.getElementById('nfcVillage');
+                if (vilSelect && vilSelect.children.length <= 1) {
+                    window.onNfcFacilityChange(facSelect.value);
+                }
+            }
+        },
         preConfirm: () => {
+            const facility = document.getElementById('nfcFacility') ? document.getElementById('nfcFacility').value : defaultHcode;
+            const villageVal = document.getElementById('nfcVillage') ? document.getElementById('nfcVillage').value : '';
             const name = document.getElementById('nfcName').value.trim();
             const cid = document.getElementById('nfcCid').value.trim();
             const dob = document.getElementById('nfcDob').value;
             const age = document.getElementById('nfcAge').value.trim();
-            const village = document.getElementById('nfcVillage').value;
             const house = document.getElementById('nfcHouse').value.trim();
+            const hn = document.getElementById('nfcHn') ? document.getElementById('nfcHn').value.trim() : '';
             const parent = document.getElementById('nfcParent').value.trim();
             const phone = document.getElementById('nfcPhone').value.trim();
+            const type = document.getElementById('nfcType') ? document.getElementById('nfcType').value : '2';
             const status = document.getElementById('nfcStatus').value;
             const remarks = document.getElementById('nfcRemarks').value.trim();
             const gps = document.getElementById('nfcGps').value;
 
+            if (!facility) {
+                Swal.showValidationMessage('กรุณาเลือก รพ.สต. ที่รับผิดชอบ');
+                return false;
+            }
+            if (!villageVal) {
+                Swal.showValidationMessage('กรุณาเลือกหมู่ที่ / หมู่บ้านที่พบเด็ก');
+                return false;
+            }
             if (!name) {
                 Swal.showValidationMessage('กรุณากรอกชื่อ - สกุล เด็ก');
                 return false;
             }
-            if (!village) {
-                Swal.showValidationMessage('กรุณาเลือกหมู่บ้านที่พบเด็ก');
-                return false;
-            }
-            return { name, cid, dob, age, village, house, parent, phone, status, remarks, gps };
+            return { facility, villageVal, name, cid, dob, age, house, hn, parent, phone, type, status, remarks, gps };
         }
     }).then(async (result) => {
         if (result.isConfirmed) {
             const d = result.value;
-            showLoading('กำลังบันทึกเด็กใหม่เข้าสู่ระบบติดตาม...');
+            showLoading('กำลังบันทึกข้อมูลเด็กใหม่เข้าตาราง data...');
 
             const cleanCid = String(d.cid || '').replace(/\D/g, '');
-            const childIdVal = Number(cleanCid) || Date.now();
-            const reporter = (APP.currentUser && (APP.currentUser.fullname || APP.currentUser.username)) ? (APP.currentUser.fullname || APP.currentUser.username) : 'เจ้าหน้าที่';
-            const userHcode = (APP.currentUser && APP.currentUser.hcode) ? APP.currentUser.hcode : myHcode;
+            const cleanHn = String(d.hn || '').replace(/\D/g, '');
+            const targetHcode = String(d.facility || defaultHcode).padStart(5, '0');
+            const targetHname = HEALTH_FACILITIES[targetHcode] || getFacilityDisplayName(targetHcode) || '-';
 
+            // แยกเลขหมู่ และ ชื่อหมู่บ้าน
+            const vParts = String(d.villageVal || '').split('|');
+            const selectedMoo = Number(vParts[0]) || 0;
+            const selectedVillname = vParts[1] || d.villageVal || '-';
+
+            // ดึงตำบลของ รพ.สต.
+            const subdistrictMap = {
+                '09491': 'สะกอม', '09492': 'ตาแปด', '09493': 'เกาะสะบ้า',
+                '09494': 'ลำไพล', '09495': 'ท่าไทร', '09496': 'ท่าม่วง',
+                '09497': 'พรุชิง', '09498': 'วังใหญ่', '09499': 'สะกอม',
+                '09500': 'ท่าแมงลัก', '11915': 'ทุ่งโดน', '15107': 'เทพา', '15109': 'เทพา'
+            };
+            const subdist = subdistrictMap[targetHcode] || '-';
+
+            const reporter = (APP.currentUser && (APP.currentUser.fullname || APP.currentUser.username)) ? (APP.currentUser.fullname || APP.currentUser.username) : 'เจ้าหน้าที่';
+
+            // ✅ 1. เตรียมแถวข้อมูลสำหรับตาราง data (โครงสร้างตรงตาม Supabase schema อย่างเคร่งครัด)
+            const dataRow = {
+                hcode: targetHcode,
+                CID: cleanCid ? Number(cleanCid) : null,
+                HN: cleanHn ? Number(cleanHn) : null,
+                fullname: d.name,
+                DOB: d.dob ? d.dob : null,
+                type: Number(d.type) || 2,
+                house: d.house || '-',
+                moo: selectedMoo,
+                villname: selectedVillname,
+                subdistname: subdist,
+                father: d.parent || '-',
+                phone: d.phone || null,
+                GPS: d.gps || null,
+                VHV: reporter
+            };
+
+            // ✅ 2. เตรียมแถวบันทึกการติดตาม VCC_tracking
+            const childIdVal = cleanCid ? Number(cleanCid) : (cleanHn ? Number(cleanHn) : Date.now());
             const trackingRecord = {
                 ChildId: childIdVal,
                 ChildName: d.name,
-                Village: d.village,
+                Village: selectedVillname ? `หมู่ที่ ${selectedMoo} ${selectedVillname}` : '-',
                 Status: d.status,
                 Vaccine: 'ทั่วไป',
                 VisitDate: todayStr,
-                Remarks: (d.remarks ? d.remarks + ' ' : '') + '[เด็กใหม่ตกสำรวจที่พบในพื้นที่]',
+                Remarks: (d.remarks ? d.remarks + ' ' : '') + `[เด็กใหม่ที่พบในพื้นที่ ${targetHname}]`,
                 GPS: d.gps || '',
                 Reporter: reporter,
                 Timestamp: new Date().toISOString()
             };
 
             try {
-                // บันทึกลงตาราง VCC_tracking
-                const { error: trkErr } = await supabaseClient.from('VCC_tracking').insert([trackingRecord]);
-                if (trkErr) throw trkErr;
-
-                // พยายามบันทึกลงตาราง data ด้วยเพื่อให้มีประวัติถาวร
-                try {
-                    const dataRow = {
-                        CID: cleanCid || String(childIdVal),
-                        fullname: d.name,
-                        DOB: d.dob || todayStr,
-                        age: d.age || '1 ปี',
-                        house: d.house || '-',
-                        moo: String(d.village).replace(/\D/g, '') || '1',
-                        villname: d.village,
-                        phone: d.phone || '-',
-                        hcode: userHcode,
-                        type: 2, // Type 2 = เด็กนอกพื้นที่/พบในพื้นที่
-                        father: d.parent || '-',
-                        GPS: d.gps || '-'
-                    };
-                    await supabaseClient.from('data').insert([dataRow]);
-                } catch (dataErr) {
-                    console.warn('Could not insert to data table (optional):', dataErr);
+                // 1. บันทึกเข้าตาราง data เป็นลำดับแรก
+                const { error: dataErr } = await supabaseClient.from('data').insert([dataRow]);
+                if (dataErr) {
+                    console.error('Supabase data insert error:', dataErr);
+                    throw new Error('ไม่สามารถบันทึกลงตาราง data: ' + (dataErr.message || JSON.stringify(dataErr)));
                 }
+
+                // 2. บันทึกลงตาราง VCC_tracking
+                const { error: trkErr } = await supabaseClient.from('VCC_tracking').insert([trackingRecord]);
+                if (trkErr) {
+                    console.warn('VCC_tracking insert warning:', trkErr);
+                }
+
+                // 3. เคลียร์แคชระบบ เพื่อให้ค้นพบเด็กคนนี้และสะท้อนในทุกรายงานทันที
+                if (typeof APP !== 'undefined' && APP) {
+                    APP.coverageData = null;
+                }
+                window.DTP_RAW_CHILDREN = null;
+                window.PCV_RAW_CHILDREN = null;
+                window.DTP_CACHE = null;
+                window.PCV_CACHE = null;
 
                 hideLoading();
                 Swal.fire({
                     icon: 'success',
-                    title: 'บันทึกสำเร็จ!',
-                    text: `เพิ่มเด็กที่พบ "${d.name}" เข้าสู่ระบบติดตามเรียบร้อยแล้ว`,
-                    timer: 2200,
-                    showConfirmButton: false
+                    title: 'บันทึกเข้าตาราง data สำเร็จ!',
+                    html: `
+                        <div style="font-size:14px; text-align:left; line-height:1.8; color:#334155;">
+                            <div><b>ชื่อเด็ก:</b> ${esc(d.name)}</div>
+                            <div><b>สถานพยาบาล:</b> ${esc(targetHname)} (${esc(targetHcode)})</div>
+                            <div><b>พื้นที่:</b> หมู่ที่ ${selectedMoo} ${esc(selectedVillname)}</div>
+                            <div><b>สถานะติดตาม:</b> <span class="badge" style="background:#dcfce7; color:#15803d;">${esc(d.status)}</span></div>
+                        </div>
+                    `,
+                    timer: 3000,
+                    showConfirmButton: true,
+                    confirmButtonText: 'ตกลง',
+                    confirmButtonColor: '#10b981'
                 });
 
                 loadFoundChildReportData();
@@ -26523,11 +26673,12 @@ async function openRegisterNewFoundChildModal(prefilledName) {
             } catch (err) {
                 hideLoading();
                 console.error('register new found child error:', err);
-                Swal.fire('ผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้: ' + err.message, 'error');
+                Swal.fire('ผิดพลาด', err.message || 'ไม่สามารถบันทึกข้อมูลได้', 'error');
             }
         }
     });
 }
+
 
 // 📊 โหลดข้อมูลตารางรายงานเด็กที่พบ
 async function loadFoundChildReportData() {
