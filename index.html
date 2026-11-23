@@ -15726,6 +15726,54 @@ function updateBottomNavActive(page) {
                 '<tbody id="missingTbody"></tbody>' +
                 '</table></div>';
 
+            // 🔒 Lock village สำหรับ อสม. — เห็นเฉพาะหมู่บ้านตัวเอง
+            const mVillageEl = document.getElementById('mVillage');
+            const isVHV = APP.currentUser && APP.currentUser.role === 'อสม.';
+            const myVillageName = APP.currentUser && APP.currentUser.village ? String(APP.currentUser.village).trim() : '';
+            if (isVHV && myVillageName && myVillageName !== '-' && mVillageEl) {
+                // หา option ที่ตรงกับหมู่บ้านของ อสม.
+                let matched = false;
+                Array.from(mVillageEl.options).forEach(function(opt) {
+                    if (opt.value !== 'ทั้งหมด' && opt.value.includes(myVillageName)) {
+                        mVillageEl.value = opt.value;
+                        matched = true;
+                    }
+                });
+                if (!matched && myVillageName) {
+                    // เพิ่ม option ที่ตรงกันหากยังไม่มี
+                    const newOpt = document.createElement('option');
+                    newOpt.value = myVillageName;
+                    newOpt.textContent = myVillageName;
+                    mVillageEl.appendChild(newOpt);
+                    mVillageEl.value = myVillageName;
+                }
+                mVillageEl.disabled = true;
+                mVillageEl.title = 'แสดงเฉพาะหมู่บ้านที่รับผิดชอบ';
+                // เพิ่ม badge แจ้งเตือน
+                const mVillageGroup = mVillageEl.closest('.filter-group');
+                if (mVillageGroup && !mVillageGroup.querySelector('.village-lock-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'village-lock-badge';
+                    badge.style.cssText = 'display:inline-block; background:#fef3c7; color:#92400e; border:1px solid #fcd34d; border-radius:4px; font-size:10px; padding:2px 6px; margin-top:3px;';
+                    badge.textContent = '🔒 เฉพาะหมู่บ้านของท่าน';
+                    mVillageGroup.appendChild(badge);
+                }
+            }
+
+            // 🔒 Lock สถานพยาบาล: เจ้าหน้าที่ทั่วไป ต้องไม่เห็นหมู่บ้านข้าม รพ.สต.
+            if (!isAdminAmpurUser() && !isSpecialOfficerUser()) {
+                // ไม่มี facility dropdown สำหรับ เจ้าหน้าที่ทั่วไป → hcode ถูก lock ที่ doMissingSearch แล้ว
+                // เพิ่ม badge แจ้งเตือนที่ชื่อหน้า
+                const pageTitle = page.querySelector('.page-title');
+                if (pageTitle && !page.querySelector('.hcode-lock-badge')) {
+                    const hBadge = document.createElement('span');
+                    hBadge.className = 'hcode-lock-badge';
+                    hBadge.style.cssText = 'display:inline-block; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:5px; font-size:11px; font-weight:600; padding:2px 8px; margin-left:8px; vertical-align:middle;';
+                    hBadge.textContent = '🏥 เฉพาะ ' + getFacilityDisplayName(APP.currentUser.hcode);
+                    pageTitle.appendChild(hBadge);
+                }
+            }
+
             document.getElementById('mSearchBtn').addEventListener('click', doMissingSearch);
             document.getElementById('mResetBtn').addEventListener('click', function() {
                 const mFac = document.getElementById('mFacility');
@@ -15734,7 +15782,10 @@ function updateBottomNavActive(page) {
                     cascadeVillageOptions('ทั้งหมด', 'mVillage');
                 }
                 document.getElementById('mSearch').value = '';
-                document.getElementById('mVillage').value = 'ทั้งหมด';
+                // รีเซ็ต village แต่ถ้า อสม. ให้คงค่าหมู่บ้านตัวเองไว้
+                if (!isVHV) {
+                    document.getElementById('mVillage').value = 'ทั้งหมด';
+                }
                 window.MISSING_SELECTED_MAP.clear();
                 updateMissingSelectedCount();
                 doMissingSearch();
