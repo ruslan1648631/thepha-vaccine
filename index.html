@@ -7585,7 +7585,7 @@
                 const { data: trackRefused } = await supabaseClient
                     .from('VCC_tracking')
                     .select('ChildId, ChildName, Status, Remarks, Timestamp')
-                    .or('Status.ilike.%ปฏิเสธ%,Remarks.ilike.%ปฏิเสธ%')
+                    .or('Status.ilike.*ปฏิเสธ*,Remarks.ilike.*ปฏิเสธ*')
                     .order('Timestamp', { ascending: false });
                 if (trackRefused && trackRefused.length > 0) {
                     trackRefused.forEach(t => {
@@ -9640,8 +9640,13 @@
                 try {
                     const cleanName = childId.replace(/[\'\"\%\_]/g, '').trim();
                     if (cleanName) {
-                        const { data: byName, error: nameErr } = await supabaseClient.from('data').select('*').ilike('fullname', '%' + cleanName + '%').limit(1);
-                        if (!nameErr && byName && byName.length > 0) data = byName;
+                        // ใช้ fetchAllFromTable กรองฝั่ง JS เพื่อหลีกเลี่ยง ilike บน bigint column
+                        const allByName = await fetchAllFromTable('data', 'CID, HN, fullname, DOB, moo, villname, hcode, hname, house, type, subdistname');
+                        const matchedByName = allByName.filter(r => {
+                            const rn = String(r.fullname || r['ชื่อ-สกุล'] || r.childname || '').toLowerCase();
+                            return rn.includes(cleanName.toLowerCase());
+                        });
+                        if (matchedByName.length > 0) data = matchedByName;
                     }
                 } catch(e) {}
             }
@@ -10479,14 +10484,14 @@
                 const orConds = [];
                 if (myUser) {
                     orConds.push(`Reporter.eq.${myUser}`);
-                    orConds.push(`Reporter.ilike.%${myUser}%`);
+                    orConds.push(`Reporter.ilike.*${myUser}*`);
                 }
                 if (myName) {
                     orConds.push(`Reporter.eq.${myName}`);
-                    orConds.push(`Reporter.ilike.%${myName}%`);
+                    orConds.push(`Reporter.ilike.*${myName}*`);
                 }
                 if (myHcode && myHcode !== '-') {
-                    orConds.push(`Reporter.ilike.%${myHcode}%`);
+                    orConds.push(`Reporter.ilike.*${myHcode}*`);
                 }
                 if (orConds.length > 0) {
                     q = q.or(orConds.join(','));
@@ -10498,7 +10503,7 @@
             // กรองสถานะ
             if (filters.status && filters.status !== 'ทั้งหมด') {
                 if (filters.status === 'ย้ายที่อยู่') {
-                    q = q.or('Status.eq.ย้ายที่อยู่,Status.ilike.%ย้าย%,Remarks.ilike.%ย้าย%');
+                    q = q.or('Status.eq.ย้ายที่อยู่,Status.ilike.*ย้าย*,Remarks.ilike.*ย้าย*');
                 } else {
                     q = q.eq('Status', filters.status);
                 }
@@ -12739,6 +12744,7 @@ async function warmUpBackend() {
                 { sep: 'ติดตาม' },
                 { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' },
                 { id: 'officerTracking', icon: 'fas fa-clipboard-list', label: 'ติดตามวัคซีน' },
+                { id: 'foundChildReport', icon: 'fas fa-search-plus', label: 'ค้นหา/เพิ่มเด็กที่พบ', badge: 'พบในพื้นที่' },
                 { id: 'report', icon: 'fas fa-file-medical-alt', label: 'รายงานการติดตาม' },
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
                 { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
@@ -12760,6 +12766,7 @@ async function warmUpBackend() {
                 { id: 'districtChildSearch', icon: 'fas fa-search-location', label: 'ค้นหาเด็กในอำเภอ', badge: 'ค้นข้ามเขต' },
                 { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' },
                 { id: 'officerTracking', icon: 'fas fa-clipboard-list', label: 'ติดตามวัคซีน' },
+                { id: 'foundChildReport', icon: 'fas fa-search-plus', label: 'ค้นหา/เพิ่มเด็กที่พบ', badge: 'พบในพื้นที่' },
                 { id: 'report', icon: 'fas fa-file-medical-alt', label: 'รายงานการติดตาม' },
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
                 { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
@@ -12776,6 +12783,7 @@ async function warmUpBackend() {
                 { id: 'pcvTarget', icon: 'fas fa-syringe', label: 'กลุ่มเป้าหมายวัคซีน PCV' },
                 { id: 'vaccineStock', icon: 'fas fa-boxes', label: 'คลังวัคชีน' },
                 { id: 'districtChildSearch', icon: 'fas fa-search-location', label: 'ค้นหาเด็กในอำเภอ', badge: 'ค้นข้ามเขต' },
+                { id: 'foundChildReport', icon: 'fas fa-search-plus', label: 'ค้นหา/เพิ่มเด็กที่พบ', badge: 'พบในพื้นที่' },
                 { id: 'trackingForm', icon: 'fas fa-plus-circle', label: 'รายงานการติดตาม' },
                 { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' },
                 { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'บันทึกผลติดตาม (Fast)', badge: 'มือถือ' }
@@ -12784,7 +12792,7 @@ async function warmUpBackend() {
 
         document.getElementById('sidebarMenu').innerHTML = items.map(function(item) {
             if (item.sep) return '<div class="menu-section">' + item.sep + '</div>';
-            var badgeColor = item.badge === 'ค้นข้ามเขต' ? '#0284c7' : item.badge === 'มือถือ' ? '#16a34a' : '#dc2626';
+            var badgeColor = item.badge === 'ค้นข้ามเขต' ? '#0284c7' : item.badge === 'มือถือ' ? '#16a34a' : item.badge === 'พบในพื้นที่' ? '#0284c7' : '#dc2626';
             var badgeHtml = item.badge ? '<span class="badge" style="margin-left:auto;background:' + badgeColor + ';color:#fff;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.3px;box-shadow:0 1px 3px rgba(2,132,199,0.3);">' + item.badge + '</span>' : '';
             return '<div class="menu-item ' + (APP.currentPage === item.id ? 'active' : '') + '" data-page="' +
                 item.id + '"><i class="' + item.icon + '"></i><span>' + item.label + '</span>' + badgeHtml + '</div>';
@@ -12932,6 +12940,7 @@ const PAGE_TITLES = {
     calendar: 'ปฏิทินนัดวัคซีน',
     trackingForm: 'รายงานการติดตาม',
     officerTracking: 'ติดตามวัคซีนเด็ก',
+    foundChildReport: 'รายงานค้นหาและเพิ่มรายชื่อเด็กที่พบ (ติดตามเด็กนอกเขต/ในพื้นที่)',
     report: 'รายงานสรุปการติดตามวัคซีน',
     coverage: 'ความครอบคลุมวัคซีน',
     duplicateReport: 'ตรวจสอบเด็กคนเดียว อยู่หลายสถานพยาบาล (เลขบัตรประชาชนซ้ำ)',
@@ -12976,6 +12985,7 @@ function navigateTo(page) {
         case 'calendar': loadCalendarPage(); break;
         case 'trackingForm': loadTrackingFormPage(); break;
         case 'officerTracking': loadOfficerTrackingPage(); break;
+        case 'foundChildReport': loadFoundChildReportPage(); break;
         case 'report': loadReportPage(); break;
         case 'coverage': 
             document.getElementById('coveragePage').classList.add('active');
@@ -19337,7 +19347,12 @@ function updateBottomNavActive(page) {
             }).join('');
 
             page.innerHTML = `
-                <div class="page-title"><i class="fas fa-clipboard-list" style="color:#0284c7;"></i> แบบฟอร์มติดตามวัคซีนเด็ก</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+                    <div class="page-title" style="margin-bottom:0;"><i class="fas fa-clipboard-list" style="color:#0284c7;"></i> แบบฟอร์มติดตามวัคซีนเด็ก</div>
+                    <button type="button" class="btn" style="background:#f0f9ff; color:#0284c7; border:1.5px solid #bae6fd; border-radius:8px; font-size:13px; font-weight:600; padding:6px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(2,132,199,0.15);" onclick="navigateTo('foundChildReport')">
+                        <i class="fas fa-search-plus"></i> ค้นหาและเพิ่มเด็กที่พบ (ข้ามเขต/นอกรายชื่อ)
+                    </button>
+                </div>
                 <div class="tracking-form-container">
                     <div class="tracking-card" style="border-top:4px solid #0284c7; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
                         <h3><i class="fas fa-child" style="color:#0284c7;"></i> ข้อมูลเด็ก</h3>
@@ -25812,6 +25827,930 @@ function exportDistrictChildSearchToExcel() {
 
     
 // ============================================================
+// 🌟 รายงานค้นหาและเพิ่มรายชื่อเด็กที่พบ ในเมนูติดตาม
+// (Search & Add Found Children Tracking Report)
+// ============================================================
+window.FOUND_CHILDREN_SEARCH_RESULTS = [];
+window.FOUND_CHILDREN_REPORT_DATA = [];
+
+async function loadFoundChildReportPage() {
+    let page = document.getElementById('foundChildReportPage');
+    if (!page) {
+        page = document.createElement('div');
+        page.id = 'foundChildReportPage';
+        page.className = 'page';
+        document.getElementById('contentArea').appendChild(page);
+    }
+    page.classList.add('active');
+    showLoading('กำลังโหลดหน้ารายงานค้นหาและเพิ่มเด็กที่พบ...');
+
+    try {
+        const [fRes, vRes] = await Promise.all([
+            callGAS('getFacilityMap', []),
+            callGAS('getVillages', [APP.currentUser ? APP.currentUser.role : '', APP.currentUser ? APP.currentUser.hcode : ''])
+        ]);
+
+        APP.facilityMap = updateFacilityMap(fRes.success ? fRes.map : {});
+        let villages = vRes.success ? (vRes.villages || []) : [];
+        if ((!villages || villages.length === 0) && APP.currentUser && APP.currentUser.hcode && typeof getOfficerVillagesForFacility === 'function') {
+            const fbList = await getOfficerVillagesForFacility(APP.currentUser.hcode);
+            if (fbList && fbList.length > 0) {
+                villages = fbList.map(v => ({
+                    name: v.name,
+                    village_name: v.name,
+                    village_no: v.no,
+                    hcode: APP.currentUser.hcode
+                }));
+            }
+        }
+        APP.villagesCache = villages;
+
+        const isAmpur = isAdminAmpurUser();
+        const isSpecial = isSpecialOfficerUser();
+        const canFilterFac = isAmpur || isSpecial;
+        const facOptions = buildFacilityDropdownOptions(canFilterFac ? 'ทั้งหมด' : (APP.currentUser.hcode || 'ทั้งหมด'), canFilterFac ? '-- ทุกสถานพยาบาลในอำเภอ --' : undefined);
+        const vilOptions = '<option value="ทั้งหมด">-- ทุกหมู่บ้าน --</option>' + (villages || []).map(v => {
+            const no = v.village_no || v.no;
+            const nm = v.village_name || v.name;
+            const lbl = (no && no !== '-' && !nm.includes('หมู่')) ? ('หมู่ที่ ' + no + ' ' + nm) : nm;
+            return `<option value="${esc(nm)}">${esc(lbl)}</option>`;
+        }).join('');
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const thirtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+        let facFilterHtml = '';
+        if (canFilterFac) {
+            facFilterHtml = `
+                <div class="filter-group" style="flex:1.5; min-width:200px;">
+                    <label style="font-weight:600; color:#1e293b;"><i class="fas fa-hospital" style="color:#0284c7;"></i> สถานพยาบาล</label>
+                    <select id="fcrFacility" onchange="cascadeVillageOptions(this.value, 'fcrVillage')" style="width:100%; border:1.5px solid #cbd5e1; border-radius:8px; padding:9px 12px; font-size:13.5px;">${facOptions}</select>
+                </div>
+            `;
+        }
+
+        page.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+                <div>
+                    <div class="page-title" style="margin-bottom:4px;">
+                        <i class="fas fa-search-plus" style="color:#0284c7;"></i> ค้นหาและเพิ่มรายชื่อเด็กที่พบ (ในเมนูติดตาม)
+                    </div>
+                    <div style="color:#64748b; font-size:13px;">
+                        ระบบค้นหาเด็กข้ามเขต/ในพื้นที่ หรือเพิ่มเด็กตกสำรวจที่พบระหว่างลงพื้นที่เคาะประตูบ้าน เพื่อบันทึกผลการติดตามและออกรายงานสรุป
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn" style="background:linear-gradient(135deg, #10b981, #059669); color:white; border:none; padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 6px rgba(16,185,129,0.3);" onclick="openRegisterNewFoundChildModal()">
+                        <i class="fas fa-user-plus"></i> เพิ่มเด็กใหม่ที่พบในพื้นที่ (ไม่มีในระบบ)
+                    </button>
+                    <button class="btn" style="background:#10b981; color:white; border:none; padding:8px 14px; border-radius:8px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 4px rgba(16,185,129,0.2);" onclick="exportFoundChildReportExcel()">
+                        <i class="fas fa-file-excel"></i> ส่งออก Excel
+                    </button>
+                    <button class="btn-rpt-csv" style="padding:8px 14px; border-radius:8px;" onclick="exportFoundChildReportCsv()">
+                        <i class="fas fa-file-csv"></i> ส่งออก CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- กล่องค้นหาเด็กข้ามเขต/ในพื้นที่ เพื่อเพิ่มเข้าระบบติดตาม -->
+            <div class="filter-bar" style="background:linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border:1.5px solid #bae6fd; border-radius:12px; padding:18px 20px; box-shadow:0 2px 6px rgba(2,132,199,0.1); margin-bottom:20px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="background:#0284c7; color:white; width:28px; height:28px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:14px;"><i class="fas fa-search"></i></span>
+                        <strong style="color:#0369a1; font-size:15px;">ค้นหาเด็กในอำเภอ เพื่อบันทึกผลการติดตาม / เพิ่มเข้าบัญชีติดตาม</strong>
+                    </div>
+                    <span style="font-size:12px; color:#0284c7; background:rgba(255,255,255,0.7); padding:3px 10px; border-radius:12px; border:1px solid #bae6fd;">
+                        💡 ค้นหาครอบคลุมทุกสถานพยาบาล และทุก Type (1, 2, 3, 4)
+                    </span>
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+                    <div style="flex:3; min-width:280px;">
+                        <input type="text" id="fcrSearchChildInput" placeholder="พิมพ์ชื่อ-สกุล, เลขบัตรประชาชน 13 หลัก, หรือ HN เพื่อค้นหาเด็ก..." style="width:100%; border:2px solid #38bdf8; border-radius:8px; padding:10px 14px; font-size:14px; background:white; font-family:'Kanit',sans-serif;">
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-filter" id="fcrSearchChildBtn" style="background:#0284c7; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 4px rgba(2,132,199,0.25);">
+                            <i class="fas fa-search"></i> ค้นหาเด็ก
+                        </button>
+                        <button class="btn-reset" onclick="clearFoundChildSearch()" style="padding:10px 14px; border-radius:8px;">
+                            <i class="fas fa-times"></i> ล้างผลค้นหา
+                        </button>
+                    </div>
+                </div>
+
+                <!-- พื้นที่แสดงผลการค้นหาเด็ก -->
+                <div id="fcrSearchResultArea" style="margin-top:14px; display:none;"></div>
+            </div>
+
+            <!-- กล่องสถิติสรุปผลการติดตามเด็กที่พบ -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:20px;">
+                <div style="background:white; border-radius:12px; padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; align-items:center; gap:14px; border-left:4px solid #0284c7;">
+                    <div style="width:44px; height:44px; border-radius:10px; background:#e0f2fe; color:#0284c7; display:flex; align-items:center; justify-content:center; font-size:18px;">
+                        <i class="fas fa-user-check"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">เด็กที่พบและติดตามทั้งหมด</div>
+                        <div id="fcrStatTotal" style="font-size:22px; font-weight:700; color:#0f172a;">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                </div>
+                <div style="background:white; border-radius:12px; padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; align-items:center; gap:14px; border-left:4px solid #10b981;">
+                    <div style="width:44px; height:44px; border-radius:10px; background:#dcfce7; color:#10b981; display:flex; align-items:center; justify-content:center; font-size:18px;">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">ฉีดแล้วที่อื่น / รับแล้ว</div>
+                        <div id="fcrStatVaccinated" style="font-size:22px; font-weight:700; color:#059669;">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                </div>
+                <div style="background:white; border-radius:12px; padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; align-items:center; gap:14px; border-left:4px solid #3b82f6;">
+                    <div style="width:44px; height:44px; border-radius:10px; background:#dbeafe; color:#2563eb; display:flex; align-items:center; justify-content:center; font-size:18px;">
+                        <i class="fas fa-calendar-check"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">นัดมา รพ.สต.</div>
+                        <div id="fcrStatAppointed" style="font-size:22px; font-weight:700; color:#2563eb;">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                </div>
+                <div style="background:white; border-radius:12px; padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; align-items:center; gap:14px; border-left:4px solid #f59e0b;">
+                    <div style="width:44px; height:44px; border-radius:10px; background:#fef3c7; color:#d97706; display:flex; align-items:center; justify-content:center; font-size:18px;">
+                        <i class="fas fa-truck-moving"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">ย้ายที่อยู่</div>
+                        <div id="fcrStatMoved" style="font-size:22px; font-weight:700; color:#d97706;">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                </div>
+                <div style="background:white; border-radius:12px; padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; align-items:center; gap:14px; border-left:4px solid #ef4444;">
+                    <div style="width:44px; height:44px; border-radius:10px; background:#fee2e2; color:#ef4444; display:flex; align-items:center; justify-content:center; font-size:18px;">
+                        <i class="fas fa-times-circle"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">ปฏิเสธ / ขาดนัด</div>
+                        <div id="fcrStatRefused" style="font-size:22px; font-weight:700; color:#dc2626;">0 <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- กล่องตัวกรองตารางรายงาน -->
+            <div class="filter-bar" style="background:white; border-radius:12px; padding:16px 20px; box-shadow:0 1px 3px rgba(0,0,0,0.05); margin-bottom:16px; border:1px solid #e2e8f0;">
+                <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; width:100%;">
+                    ${facFilterHtml}
+                    <div class="filter-group" style="flex:1.2; min-width:160px;">
+                        <label style="font-weight:600; color:#1e293b;"><i class="fas fa-home" style="color:#0284c7;"></i> หมู่บ้านที่พบ</label>
+                        <select id="fcrVillage" style="width:100%; border:1.5px solid #cbd5e1; border-radius:8px; padding:9px 12px; font-size:13.5px;">${vilOptions}</select>
+                    </div>
+                    <div class="filter-group" style="flex:1.2; min-width:160px;">
+                        <label style="font-weight:600; color:#1e293b;"><i class="fas fa-tasks" style="color:#0284c7;"></i> ผลการติดตาม</label>
+                        <select id="fcrStatus" style="width:100%; border:1.5px solid #cbd5e1; border-radius:8px; padding:9px 12px; font-size:13.5px;">
+                            <option value="ทั้งหมด">-- ทุกสถานะ --</option>
+                            <option value="ฉีดแล้วที่อื่น">ฉีดแล้วที่อื่น</option>
+                            <option value="นัดมา รพ.สต.">นัดมา รพ.สต.</option>
+                            <option value="ย้ายที่อยู่">ย้ายที่อยู่</option>
+                            <option value="ปฏิเสธ">ปฏิเสธวัคซีน</option>
+                            <option value="ตามนัดปกติ">ตามนัดปกติ (รับแล้ว)</option>
+                            <option value="ขาดนัด">ขาดนัด</option>
+                        </select>
+                    </div>
+                    <div class="filter-group" style="flex:1.1; min-width:140px;">
+                        <label style="font-weight:600; color:#1e293b;"><i class="fas fa-calendar-alt" style="color:#0284c7;"></i> ตั้งแต่วันที่</label>
+                        <input type="date" id="fcrDateFrom" value="${thirtyDaysAgo}" style="width:100%; border:1.5px solid #cbd5e1; border-radius:8px; padding:8px 10px; font-size:13.5px;">
+                    </div>
+                    <div class="filter-group" style="flex:1.1; min-width:140px;">
+                        <label style="font-weight:600; color:#1e293b;"><i class="fas fa-calendar-check" style="color:#0284c7;"></i> ถึงวันที่</label>
+                        <input type="date" id="fcrDateTo" value="${todayStr}" style="width:100%; border:1.5px solid #cbd5e1; border-radius:8px; padding:8px 10px; font-size:13.5px;">
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-filter" onclick="loadFoundChildReportData()" style="padding:9px 16px; border-radius:8px;">
+                            <i class="fas fa-filter"></i> กรองรายงาน
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ตารางแสดงรายงานเด็กที่พบ -->
+            <div class="data-table" style="width:100%; overflow-x:auto; background:white; border-radius:12px; padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.05); border:1px solid #e2e8f0;">
+                <table id="foundChildReportTable" class="display nowrap" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="width:40px; text-align:center;">#</th>
+                            <th>วันที่พบ/ติดตาม</th>
+                            <th>สถานพยาบาล</th>
+                            <th>หมู่บ้านที่พบ</th>
+                            <th>เลขบัตรประชาชน (CID)</th>
+                            <th>HN</th>
+                            <th>ชื่อ-สกุล เด็ก</th>
+                            <th>วัคซีนที่ติดตาม</th>
+                            <th>ผลการติดตาม</th>
+                            <th>หมายเหตุ / ที่อยู่ใหม่</th>
+                            <th>พิกัด GPS</th>
+                            <th>ผู้บันทึก/รายงาน</th>
+                            <th style="text-align:center;">จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="foundChildReportTbody">
+                        <tr><td colspan="13" class="no-data" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-pulse"></i> กำลังโหลดข้อมูล...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        // Event Listeners
+        document.getElementById('fcrSearchChildBtn').addEventListener('click', doFoundChildSearch);
+        document.getElementById('fcrSearchChildInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') doFoundChildSearch();
+        });
+
+        hideLoading();
+        loadFoundChildReportData();
+
+    } catch (err) {
+        hideLoading();
+        page.innerHTML = '<div class="error-message">เกิดข้อผิดพลาด: ' + esc(err.message) + '</div>';
+    }
+}
+
+// 🔍 ค้นหาเด็กเพื่อเพิ่มเข้าระบบติดตาม
+async function doFoundChildSearch() {
+    const input = document.getElementById('fcrSearchChildInput');
+    const term = input ? input.value.trim() : '';
+    if (!term) {
+        Swal.fire('แจ้งเตือน', 'กรุณาพิมพ์ชื่อ, สกุล, เลขบัตรประชาชน 13 หลัก, หรือ HN เพื่อค้นหาเด็ก', 'warning');
+        return;
+    }
+
+    const resArea = document.getElementById('fcrSearchResultArea');
+    if (!resArea) return;
+    resArea.style.display = 'block';
+    resArea.innerHTML = '<div style="text-align:center; padding:20px; color:#0284c7;"><i class="fas fa-spinner fa-pulse fa-2x"></i><div style="margin-top:8px;">กำลังค้นหาเด็กในอำเภอเทพา...</div></div>';
+
+    try {
+        const result = await callGAS('searchDistrictChildren', [{ search: term, hcode: 'ทั้งหมด', type: 'ทั้งหมด', status: 'ทั้งหมด' }]);
+        const children = (result.success && result.children) ? result.children : [];
+        window.FOUND_CHILDREN_SEARCH_RESULTS = children;
+
+        if (children.length === 0) {
+            resArea.innerHTML = `
+                <div style="background:white; border-radius:10px; padding:16px; border:1px dashed #cbd5e1; text-align:center;">
+                    <div style="color:#64748b; font-size:14px; margin-bottom:12px;">
+                        <i class="fas fa-user-slash" style="font-size:24px; color:#94a3b8; display:block; margin-bottom:6px;"></i>
+                        ไม่พบข้อมูลเด็ก "${esc(term)}" ในระบบอำเภอเทพา
+                    </div>
+                    <div style="color:#0369a1; font-size:13px; margin-bottom:14px;">
+                        หากเด็กคนนี้เป็นเด็กตกสำรวจ ย้ายเข้ามาใหม่ หรือยังไม่ได้ขึ้นทะเบียนใน JHCIS สามารถบันทึกเพิ่มเข้าบัญชีติดตามได้ทันที
+                    </div>
+                    <button class="btn" style="background:linear-gradient(135deg, #10b981, #059669); color:white; border:none; padding:9px 18px; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px;" onclick="openRegisterNewFoundChildModal('${esc(term)}')">
+                        <i class="fas fa-user-plus"></i> เพิ่มรายชื่อเด็กใหม่ที่พบในพื้นที่คนนี้
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <strong style="color:#0f172a; font-size:13.5px;"><i class="fas fa-check-circle" style="color:#10b981;"></i> พบข้อมูลเด็กในระบบ ${children.length} รายการ:</strong>
+                <button class="btn" style="background:#10b981; color:white; border:none; padding:4px 10px; border-radius:6px; font-size:12px; cursor:pointer;" onclick="openRegisterNewFoundChildModal()">
+                    <i class="fas fa-plus"></i> เพิ่มเด็กใหม่ (ไม่มีในผลค้นหานี้)
+                </button>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px; max-height:360px; overflow-y:auto; padding-right:4px;">
+        `;
+
+        children.forEach((c, idx) => {
+            const facName = getFacilityDisplayName(c.hcode, c.hname);
+            const dynamicAge = (typeof calculateAgeString === 'function') ? calculateAgeString(c.birthDate || c.dob) : '';
+            const displayAge = (dynamicAge && dynamicAge !== '-') ? dynamicAge : (c.age || '-');
+            const targetChildId = (c.id && c.id !== '-' && c.id !== '0') ? c.id : (c.hn && c.hn !== '-' ? c.hn : (c.cid || ''));
+
+            html += `
+                <div style="background:white; border:1px solid #bae6fd; border-radius:10px; padding:12px 14px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; flex-direction:column; justify-content:space-between; gap:8px;">
+                    <div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
+                            <strong style="color:#0f172a; font-size:14px;">${esc(c.fullname)}</strong>
+                            <span class="status-badge ${getStatusClass(c.status)}" style="font-size:11px; padding:2px 6px;">${esc(c.status)}</span>
+                        </div>
+                        <div style="font-size:12px; color:#64748b; margin-top:2px;">
+                            <span>CID: <strong style="font-family:monospace; color:#0284c7;">${esc(c.cid || '-')}</strong></span>
+                            ${c.hn ? `<span style="margin-left:8px;">HN: ${esc(c.hn)}</span>` : ''}
+                        </div>
+                        <div style="font-size:12px; color:#475569; margin-top:4px;">
+                            <span>อายุ: <strong>${esc(displayAge)}</strong></span> | 
+                            <span>เกิด: ${esc(c.birthDate || c.dob || '-')}</span>
+                        </div>
+                        <div style="font-size:11.5px; color:#64748b; margin-top:4px;">
+                            <i class="fas fa-hospital" style="color:#0284c7;"></i> สังกัดเดิม: <strong>${esc(facName)}</strong>
+                        </div>
+                        <div style="font-size:11.5px; color:#64748b; margin-top:2px;">
+                            <i class="fas fa-map-marker-alt" style="color:#f59e0b;"></i> ที่อยู่: ${esc(c.houseNumber || '-')} ม.${esc(c.village || '-')} ต.${esc(c.subdistrict || '-')}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:6px; margin-top:6px; border-top:1px dashed #e2e8f0; padding-top:8px;">
+                        <button class="btn" style="flex:1; background:linear-gradient(135deg, #0284c7, #0369a1); color:white; border:none; padding:7px 10px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:5px;" onclick="openTrackFoundChildModal(${idx})">
+                            <i class="fas fa-plus-circle"></i> บันทึกผลติดตามเด็กคนนี้
+                        </button>
+                        <button class="btn" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:7px 10px; border-radius:6px; font-size:12px; cursor:pointer;" title="ดูประวัติวัคซีน" onclick="viewChildFromMap('${esc(targetChildId)}')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+        resArea.innerHTML = html;
+
+    } catch (e) {
+        console.error('doFoundChildSearch error:', e);
+        resArea.innerHTML = '<div style="color:#dc2626; padding:12px; text-align:center;">เกิดข้อผิดพลาดในการค้นหา: ' + esc(e.message) + '</div>';
+    }
+}
+
+function clearFoundChildSearch() {
+    const input = document.getElementById('fcrSearchChildInput');
+    if (input) input.value = '';
+    const resArea = document.getElementById('fcrSearchResultArea');
+    if (resArea) {
+        resArea.style.display = 'none';
+        resArea.innerHTML = '';
+    }
+}
+
+// 📝 Modal บันทึกผลติดตามเด็กที่ค้นพบ
+async function openTrackFoundChildModal(childIndex) {
+    const child = window.FOUND_CHILDREN_SEARCH_RESULTS[childIndex];
+    if (!child) return;
+
+    const myHcode = (APP.currentUser && APP.currentUser.hcode) ? APP.currentUser.hcode : child.hcode;
+    const villages = await getOfficerVillagesForFacility(myHcode);
+    let vilOpts = '<option value="">-- เลือกหมู่บ้านที่พบเด็ก --</option>';
+    (villages || []).forEach(v => {
+        vilOpts += `<option value="${esc(v.name)}">${esc(v.name)}</option>`;
+    });
+
+    const vaccineCatalog = APP.vaccineCatalog || [];
+    let vacOpts = '<option value="ทั่วไป">ทั่วไป (ตรวจประเมิน/ติดตามวัคซีน)</option>';
+    vaccineCatalog.forEach(v => {
+        vacOpts += `<option value="${esc(v.code)}">${esc(v.name)} (${esc(v.code)})</option>`;
+    });
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const dynamicAge = (typeof calculateAgeString === 'function') ? calculateAgeString(child.birthDate || child.dob) : (child.age || '-');
+
+    const htmlContent = `
+        <div style="font-family:'Kanit',sans-serif; text-align:left; font-size:13.5px; color:#1e293b;">
+            <!-- ข้อมูลเด็กเบื้องต้น -->
+            <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:10px 14px; margin-bottom:14px;">
+                <div style="font-weight:700; color:#0369a1; font-size:15px; margin-bottom:4px;">
+                    <i class="fas fa-child"></i> ${esc(child.fullname)}
+                </div>
+                <div style="font-size:12.5px; color:#475569;">
+                    <span>CID: <strong>${esc(child.cid || '-')}</strong></span> | 
+                    <span>HN: <strong>${esc(child.hn || '-')}</strong></span> | 
+                    <span>อายุ: <strong>${esc(dynamicAge)}</strong></span>
+                </div>
+                <div style="font-size:12px; color:#64748b; margin-top:3px;">
+                    <span>สังกัดเดิม: ${esc(getFacilityDisplayName(child.hcode, child.hname))}</span>
+                </div>
+            </div>
+
+            <!-- ฟอร์มบันทึกติดตาม -->
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <div>
+                    <label style="font-weight:600; display:block; margin-bottom:3px;">หมู่บ้านที่พบเด็ก <span style="color:#dc2626;">*</span></label>
+                    <select id="mTrackVillage" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13.5px;">
+                        ${vilOpts}
+                    </select>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">วันที่พบ/ติดตาม <span style="color:#dc2626;">*</span></label>
+                        <input type="date" id="mTrackVisitDate" value="${todayStr}" style="width:100%; padding:7px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">วัคซีนที่ติดตาม</label>
+                        <select id="mTrackVaccine" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                            ${vacOpts}
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-weight:600; display:block; margin-bottom:3px;">ผลการติดตาม <span style="color:#dc2626;">*</span></label>
+                    <select id="mTrackStatus" style="width:100%; padding:8px 10px; border-radius:6px; border:2px solid #0284c7; font-family:'Kanit'; font-size:14px; font-weight:600; color:#0369a1;">
+                        <option value="ฉีดแล้วที่อื่น">✅ ฉีดแล้วที่อื่น (มีหลักฐาน/สมุดวัคซีน)</option>
+                        <option value="นัดมา รพ.สต.">📅 นัดมา รพ.สต. (ออกวันนัดใหม่)</option>
+                        <option value="ย้ายที่อยู่">🚚 ย้ายที่อยู่ (ย้ายเข้ามา/ย้ายออก)</option>
+                        <option value="ปฏิเสธ">❌ ปฏิเสธวัคซีน</option>
+                        <option value="ตามนัดปกติ">ตามนัดปกติ (ได้รับวัคซีนแล้ว)</option>
+                        <option value="เลื่อนนัด">เลื่อนนัด</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight:600; display:block; margin-bottom:3px;">หมายเหตุ / ที่อยู่ใหม่ / รายละเอียดเพิ่มเติม</label>
+                    <textarea id="mTrackRemarks" rows="2" placeholder="เช่น ฉีดที่ รพ.เอกชน, ย้ายมาจากต่างจังหวัด, นัดรับวันที่..." style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;"></textarea>
+                </div>
+                <div>
+                    <label style="font-weight:600; display:block; margin-bottom:3px;">พิกัด GPS ที่พบเด็ก</label>
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" id="mTrackGps" placeholder="ละติจูด,ลองจิจูด" readonly style="flex:1; padding:7px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:12.5px; background:#f8fafc;">
+                        <button type="button" class="btn" style="background:#0284c7; color:white; border:none; padding:7px 12px; border-radius:6px; font-size:12px; cursor:pointer;" onclick="getModalGPS('mTrackGps')">
+                            <i class="fas fa-crosshairs"></i> พิกัดปัจจุบัน
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    Swal.fire({
+        title: 'บันทึกผลการติดตามเด็กที่พบ',
+        html: htmlContent,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-save"></i> บันทึกการติดตาม',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#0284c7',
+        width: '520px',
+        preConfirm: () => {
+            const village = document.getElementById('mTrackVillage').value;
+            const visitDate = document.getElementById('mTrackVisitDate').value;
+            const vaccine = document.getElementById('mTrackVaccine').value;
+            const status = document.getElementById('mTrackStatus').value;
+            const remarks = document.getElementById('mTrackRemarks').value;
+            const gps = document.getElementById('mTrackGps').value;
+
+            if (!village) {
+                Swal.showValidationMessage('กรุณาเลือกหมู่บ้านที่พบเด็ก');
+                return false;
+            }
+            if (!visitDate) {
+                Swal.showValidationMessage('กรุณาระบุวันที่ติดตาม');
+                return false;
+            }
+            return { village, visitDate, vaccine, status, remarks, gps };
+        }
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            const data = result.value;
+            showLoading('กำลังบันทึกข้อมูลการติดตาม...');
+
+            const childIdVal = Number(String(child.cid || '').replace(/\D/g, '')) || Number(child.id) || 0;
+            const reporter = (APP.currentUser && (APP.currentUser.fullname || APP.currentUser.username)) ? (APP.currentUser.fullname || APP.currentUser.username) : 'เจ้าหน้าที่';
+            const userHcode = (APP.currentUser && APP.currentUser.hcode) ? APP.currentUser.hcode : child.hcode;
+
+            const trackingRecord = {
+                ChildId: childIdVal,
+                ChildName: child.fullname,
+                Village: data.village,
+                Status: data.status,
+                Vaccine: data.vaccine || 'ทั่วไป',
+                VisitDate: data.visitDate,
+                Remarks: (data.remarks ? data.remarks.trim() + ' ' : '') + `[เด็กที่พบ: สังกัดเดิม ${getFacilityDisplayName(child.hcode)}]`,
+                GPS: data.gps || '',
+                Reporter: reporter,
+                Timestamp: new Date().toISOString()
+            };
+
+            try {
+                const { error } = await supabaseClient.from('VCC_tracking').insert([trackingRecord]);
+                hideLoading();
+                if (error) throw error;
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'บันทึกสำเร็จ!',
+                    text: `บันทึกการติดตามเด็ก "${child.fullname}" เรียบร้อยแล้ว`,
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+
+                // รีเฟรชตารางรายงานเด็กที่พบ
+                loadFoundChildReportData();
+                clearFoundChildSearch();
+
+            } catch (err) {
+                hideLoading();
+                console.error('save found child tracking error:', err);
+                Swal.fire('ผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้: ' + err.message, 'error');
+            }
+        }
+    });
+}
+
+// ➕ Modal เพิ่มรายชื่อเด็กใหม่ที่พบในพื้นที่ (เด็กตกสำรวจ/ไม่มีในระบบ)
+async function openRegisterNewFoundChildModal(prefilledName) {
+    const myHcode = (APP.currentUser && APP.currentUser.hcode) ? APP.currentUser.hcode : '00860';
+    const villages = await getOfficerVillagesForFacility(myHcode);
+    let vilOpts = '<option value="">-- เลือกหมู่บ้านที่พบเด็ก --</option>';
+    (villages || []).forEach(v => {
+        vilOpts += `<option value="${esc(v.name)}">${esc(v.name)}</option>`;
+    });
+
+    const vaccineCatalog = APP.vaccineCatalog || [];
+    let vacOpts = '<option value="ทั่วไป">ทั่วไป (ตรวจประเมิน/ติดตามวัคซีน)</option>';
+    vaccineCatalog.forEach(v => {
+        vacOpts += `<option value="${esc(v.code)}">${esc(v.name)} (${esc(v.code)})</option>`;
+    });
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const defaultName = (typeof prefilledName === 'string' && isNaN(prefilledName)) ? prefilledName : '';
+    const defaultCid = (typeof prefilledName === 'string' && !isNaN(prefilledName) && prefilledName.length === 13) ? prefilledName : '';
+
+    const htmlContent = `
+        <div style="font-family:'Kanit',sans-serif; text-align:left; font-size:13.5px; color:#1e293b;">
+            <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:12.5px; color:#065f46;">
+                <i class="fas fa-info-circle"></i> แบบฟอร์มบันทึกเด็กที่พบในพื้นที่ (เคาะประตูบ้าน) ซึ่งยังไม่มีรายชื่อในระบบ หรือเป็นเด็กตกสำรวจ ย้ายเข้ามาใหม่
+            </div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:10px;">
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">ชื่อ - สกุล เด็ก <span style="color:#dc2626;">*</span></label>
+                        <input type="text" id="nfcName" value="${esc(defaultName)}" placeholder="ด.ช. / ด.ญ. ชื่อ สกุล" style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #cbd5e1; font-family:'Kanit'; font-size:13.5px;">
+                    </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">เลขบัตร ปชช. (13 หลัก)</label>
+                        <input type="text" id="nfcCid" value="${esc(defaultCid)}" maxlength="13" placeholder="13 หลัก (ถ้ามี)" style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">วัน/เดือน/ปี เกิด</label>
+                        <input type="date" id="nfcDob" style="width:100%; padding:7px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">อายุโดยประมาณ</label>
+                        <input type="text" id="nfcAge" placeholder="เช่น 1 ปี 4 เดือน" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">หมู่บ้านที่พบ <span style="color:#dc2626;">*</span></label>
+                        <select id="nfcVillage" style="width:100%; padding:8px 10px; border-radius:6px; border:1.5px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                            ${vilOpts}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">บ้านเลขที่</label>
+                        <input type="text" id="nfcHouse" placeholder="เช่น 24/1" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">ชื่อผู้ปกครอง</label>
+                        <input type="text" id="nfcParent" placeholder="บิดา/มารดา/ผู้ดูแล" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:3px;">เบอร์โทรศัพท์ติดต่อ</label>
+                        <input type="tel" id="nfcPhone" placeholder="08xxxxxxxx" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;">
+                    </div>
+                </div>
+                <div>
+                    <label style="font-weight:600; display:block; margin-bottom:3px;">ผลการติดตามครั้งแรก <span style="color:#dc2626;">*</span></label>
+                    <select id="nfcStatus" style="width:100%; padding:8px 10px; border-radius:6px; border:2px solid #10b981; font-family:'Kanit'; font-size:13.5px; font-weight:600; color:#047857;">
+                        <option value="ฉีดแล้วที่อื่น">✅ ฉีดแล้วที่อื่น (มีประวัติฉีดที่ รพ./คลินิกอื่น)</option>
+                        <option value="นัดมา รพ.สต.">📅 นัดมารับวัคซีนที่ รพ.สต.</option>
+                        <option value="ย้ายที่อยู่">🚚 ย้ายเข้ามาอยู่ในพื้นที่</option>
+                        <option value="ปฏิเสธ">❌ ปฏิเสธการรับวัคซีน</option>
+                        <option value="ตามนัดปกติ">ตามนัดปกติ</option>
+                        <option value="ขาดนัด">ขาดนัดวัคซีน</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight:600; display:block; margin-bottom:3px;">หมายเหตุ / ข้อมูลเพิ่มเติม</label>
+                    <textarea id="nfcRemarks" rows="2" placeholder="เช่น ย้ายมาจากจังหวัดอื่น, ไม่มีสมุดวัคซีน, พบระหว่างลงพื้นที่..." style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:13px;"></textarea>
+                </div>
+                <div>
+                    <label style="font-weight:600; display:block; margin-bottom:3px;">พิกัด GPS บ้านเด็ก</label>
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" id="nfcGps" placeholder="ละติจูด,ลองจิจูด" readonly style="flex:1; padding:7px 10px; border-radius:6px; border:1px solid #cbd5e1; font-family:'Kanit'; font-size:12.5px; background:#f8fafc;">
+                        <button type="button" class="btn" style="background:#0284c7; color:white; border:none; padding:7px 12px; border-radius:6px; font-size:12px; cursor:pointer;" onclick="getModalGPS('nfcGps')">
+                            <i class="fas fa-crosshairs"></i> พิกัดปัจจุบัน
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    Swal.fire({
+        title: '➕ เพิ่มเด็กใหม่ที่พบในพื้นที่ (ไม่มีในระบบ)',
+        html: htmlContent,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-save"></i> บันทึกข้อมูลเด็ก',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#10b981',
+        width: '540px',
+        preConfirm: () => {
+            const name = document.getElementById('nfcName').value.trim();
+            const cid = document.getElementById('nfcCid').value.trim();
+            const dob = document.getElementById('nfcDob').value;
+            const age = document.getElementById('nfcAge').value.trim();
+            const village = document.getElementById('nfcVillage').value;
+            const house = document.getElementById('nfcHouse').value.trim();
+            const parent = document.getElementById('nfcParent').value.trim();
+            const phone = document.getElementById('nfcPhone').value.trim();
+            const status = document.getElementById('nfcStatus').value;
+            const remarks = document.getElementById('nfcRemarks').value.trim();
+            const gps = document.getElementById('nfcGps').value;
+
+            if (!name) {
+                Swal.showValidationMessage('กรุณากรอกชื่อ - สกุล เด็ก');
+                return false;
+            }
+            if (!village) {
+                Swal.showValidationMessage('กรุณาเลือกหมู่บ้านที่พบเด็ก');
+                return false;
+            }
+            return { name, cid, dob, age, village, house, parent, phone, status, remarks, gps };
+        }
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            const d = result.value;
+            showLoading('กำลังบันทึกเด็กใหม่เข้าสู่ระบบติดตาม...');
+
+            const cleanCid = String(d.cid || '').replace(/\D/g, '');
+            const childIdVal = Number(cleanCid) || Date.now();
+            const reporter = (APP.currentUser && (APP.currentUser.fullname || APP.currentUser.username)) ? (APP.currentUser.fullname || APP.currentUser.username) : 'เจ้าหน้าที่';
+            const userHcode = (APP.currentUser && APP.currentUser.hcode) ? APP.currentUser.hcode : myHcode;
+
+            const trackingRecord = {
+                ChildId: childIdVal,
+                ChildName: d.name,
+                Village: d.village,
+                Status: d.status,
+                Vaccine: 'ทั่วไป',
+                VisitDate: todayStr,
+                Remarks: (d.remarks ? d.remarks + ' ' : '') + '[เด็กใหม่ตกสำรวจที่พบในพื้นที่]',
+                GPS: d.gps || '',
+                Reporter: reporter,
+                Timestamp: new Date().toISOString()
+            };
+
+            try {
+                // บันทึกลงตาราง VCC_tracking
+                const { error: trkErr } = await supabaseClient.from('VCC_tracking').insert([trackingRecord]);
+                if (trkErr) throw trkErr;
+
+                // พยายามบันทึกลงตาราง data ด้วยเพื่อให้มีประวัติถาวร
+                try {
+                    const dataRow = {
+                        CID: cleanCid || String(childIdVal),
+                        fullname: d.name,
+                        DOB: d.dob || todayStr,
+                        age: d.age || '1 ปี',
+                        house: d.house || '-',
+                        moo: String(d.village).replace(/\D/g, '') || '1',
+                        villname: d.village,
+                        phone: d.phone || '-',
+                        hcode: userHcode,
+                        type: 2, // Type 2 = เด็กนอกพื้นที่/พบในพื้นที่
+                        father: d.parent || '-',
+                        GPS: d.gps || '-'
+                    };
+                    await supabaseClient.from('data').insert([dataRow]);
+                } catch (dataErr) {
+                    console.warn('Could not insert to data table (optional):', dataErr);
+                }
+
+                hideLoading();
+                Swal.fire({
+                    icon: 'success',
+                    title: 'บันทึกสำเร็จ!',
+                    text: `เพิ่มเด็กที่พบ "${d.name}" เข้าสู่ระบบติดตามเรียบร้อยแล้ว`,
+                    timer: 2200,
+                    showConfirmButton: false
+                });
+
+                loadFoundChildReportData();
+
+            } catch (err) {
+                hideLoading();
+                console.error('register new found child error:', err);
+                Swal.fire('ผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้: ' + err.message, 'error');
+            }
+        }
+    });
+}
+
+// 📊 โหลดข้อมูลตารางรายงานเด็กที่พบ
+async function loadFoundChildReportData() {
+    const tbody = document.getElementById('foundChildReportTbody');
+    if (!tbody) return;
+    destroyDT('foundChildReportTable');
+    tbody.innerHTML = '<tr><td colspan="13" class="no-data" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-pulse"></i> กำลังโหลดข้อมูลรายงาน...</td></tr>';
+
+    const facEl = document.getElementById('fcrFacility');
+    const selectedFac = facEl ? facEl.value : (APP.currentUser ? APP.currentUser.hcode : 'ทั้งหมด');
+    const vilEl = document.getElementById('fcrVillage');
+    const selectedVil = vilEl ? vilEl.value : 'ทั้งหมด';
+    const statusEl = document.getElementById('fcrStatus');
+    const selectedStatus = statusEl ? statusEl.value : 'ทั้งหมด';
+    const dateFrom = document.getElementById('fcrDateFrom') ? document.getElementById('fcrDateFrom').value : '';
+    const dateTo = document.getElementById('fcrDateTo') ? document.getElementById('fcrDateTo').value : '';
+
+    try {
+        let q = supabaseClient.from('VCC_tracking').select('*').order('Timestamp', { ascending: false }).limit(2000);
+
+        if (dateFrom) q = q.gte('VisitDate', dateFrom);
+        if (dateTo) q = q.lte('VisitDate', dateTo);
+
+        const { data, error } = await q;
+        if (error) throw error;
+
+        let records = data || [];
+
+        // กรองความเกี่ยวข้อง: ดึงเฉพาะรายการที่มีแท็กเด็กที่พบ หรือผลการติดตามที่เกี่ยวกับเด็กนอกเขต/ย้าย/ฉีดที่อื่น
+        // หรือถ้าผู้ใช้เลือกกรอง ให้กรองตามเงื่อนไข
+        if (selectedVil && selectedVil !== 'ทั้งหมด') {
+            const vilNorm = selectedVil.trim().toLowerCase();
+            records = records.filter(r => {
+                const rv = String(r.Village || '').trim().toLowerCase();
+                return rv.includes(vilNorm) || vilNorm.includes(rv);
+            });
+        }
+
+        if (selectedStatus && selectedStatus !== 'ทั้งหมด') {
+            records = records.filter(r => String(r.Status || '').trim() === selectedStatus.trim());
+        }
+
+        window.FOUND_CHILDREN_REPORT_DATA = records;
+
+        // คำนวณสถิติ
+        const total = records.length;
+        const vaccinated = records.filter(r => r.Status === 'ฉีดแล้วที่อื่น' || r.Status === 'ตามนัดปกติ').length;
+        const appointed = records.filter(r => r.Status === 'นัดมา รพ.สต.').length;
+        const moved = records.filter(r => r.Status === 'ย้ายที่อยู่' || r.Status === 'ย้ายออก').length;
+        const refused = records.filter(r => r.Status === 'ปฏิเสธ' || r.Status === 'ปฏิเสธวัคซีน' || r.Status === 'ขาดนัด').length;
+
+        const elTot = document.getElementById('fcrStatTotal');
+        const elVac = document.getElementById('fcrStatVaccinated');
+        const elApp = document.getElementById('fcrStatAppointed');
+        const elMov = document.getElementById('fcrStatMoved');
+        const elRef = document.getElementById('fcrStatRefused');
+
+        if (elTot) elTot.innerHTML = `${total} <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span>`;
+        if (elVac) elVac.innerHTML = `${vaccinated} <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span>`;
+        if (elApp) elApp.innerHTML = `${appointed} <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span>`;
+        if (elMov) elMov.innerHTML = `${moved} <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span>`;
+        if (elRef) elRef.innerHTML = `${refused} <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span>`;
+
+        if (records.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="13" class="no-data" style="text-align:center; padding:36px; color:#64748b;"><i class="fas fa-inbox" style="font-size:24px; color:#94a3b8; display:block; margin-bottom:8px;"></i> ยังไม่มีข้อมูลการติดตามเด็กที่พบในช่วงเวลานี้ สามารถค้นหาและเพิ่มได้จากกล่องค้นหาด้านบน</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = records.map((r, i) => {
+            const gpsLink = (r.GPS && r.GPS.includes(',')) 
+                ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.GPS.trim())}" target="_blank" style="color:#0284c7; font-weight:600; text-decoration:none;"><i class="fas fa-map-marker-alt"></i> แผนที่</a>` 
+                : '<span style="color:#94a3b8;">-</span>';
+
+            const statusClass = getStatusClass(r.Status);
+            const statusBadge = `<span class="status-badge ${statusClass}">${esc(r.Status || '-')}</span>`;
+
+            const childIdStr = String(r.ChildId || '-');
+
+            return `
+                <tr>
+                    <td style="text-align:center; color:#64748b;">${i + 1}</td>
+                    <td style="font-size:12.5px;">${esc(r.VisitDate || (r.Timestamp ? r.Timestamp.slice(0, 10) : '-'))}</td>
+                    <td style="font-size:12.5px; color:#0369a1; font-weight:500;">${esc(getFacilityDisplayName(r.hcode || ''))}</td>
+                    <td style="font-size:12.5px;">${esc(r.Village || '-')}</td>
+                    <td style="font-family:monospace; font-size:12.5px; color:#0284c7;">${esc(childIdStr)}</td>
+                    <td style="font-family:monospace; font-size:12px;">${esc(r.HN || '-')}</td>
+                    <td style="font-weight:600; color:#0f172a;">${esc(r.ChildName || '-')}</td>
+                    <td style="font-size:12px;"><span class="badge" style="background:#e0f2fe; color:#0284c7;">${esc(r.Vaccine || '-')}</span></td>
+                    <td>${statusBadge}</td>
+                    <td style="font-size:12px; max-width:200px; white-space:normal;">${esc(r.Remarks || '-')}</td>
+                    <td style="font-size:12px;">${gpsLink}</td>
+                    <td style="font-size:12px; color:#475569;">${esc(r.Reporter || '-')}</td>
+                    <td style="text-align:center;">
+                        <button class="action-btn view" title="ดูประวัติเด็ก" onclick="viewChildFromMap('${esc(childIdStr)}')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        initDT('foundChildReportTable', {
+            scrollX: true,
+            autoWidth: false,
+            order: [[1, 'desc']],
+            columnDefs: [{ orderable: false, targets: [0, 12] }]
+        });
+
+    } catch (err) {
+        console.error('loadFoundChildReportData error:', err);
+        tbody.innerHTML = '<tr><td colspan="13" class="no-data" style="color:#dc2626; text-align:center;">เกิดข้อผิดพลาดในการโหลดรายงาน: ' + esc(err.message) + '</td></tr>';
+    }
+}
+
+// 📥 ส่งออก Excel รายงานเด็กที่พบ
+function exportFoundChildReportExcel() {
+    if (!window.FOUND_CHILDREN_REPORT_DATA || window.FOUND_CHILDREN_REPORT_DATA.length === 0) {
+        Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลสำหรับส่งออก', 'info');
+        return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const dataRows = [
+        ['ลำดับ', 'วันที่พบ/ติดตาม', 'สถานพยาบาล', 'หมู่บ้านที่พบ', 'เลขบัตรประชาชน (CID)', 'HN', 'ชื่อ-สกุล เด็ก', 'วัคซีนที่ติดตาม', 'ผลการติดตาม', 'หมายเหตุ / ที่อยู่ใหม่', 'พิกัด GPS', 'ผู้บันทึก/รายงาน', 'เวลาบันทึกระบบ']
+    ];
+
+    window.FOUND_CHILDREN_REPORT_DATA.forEach((r, i) => {
+        dataRows.push([
+            i + 1,
+            r.VisitDate || '',
+            getFacilityDisplayName(r.hcode || ''),
+            r.Village || '',
+            r.ChildId ? String(r.ChildId) : '',
+            r.HN || '',
+            r.ChildName || '',
+            r.Vaccine || '',
+            r.Status || '',
+            r.Remarks || '',
+            r.GPS || '',
+            r.Reporter || '',
+            r.Timestamp || ''
+        ]);
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(dataRows);
+    XLSX.utils.book_append_sheet(wb, ws, 'รายงานเด็กที่พบ');
+    const fileName = 'รายงานค้นหาและเพิ่มเด็กที่พบ_' + today + '.xlsx';
+    XLSX.writeFile(wb, fileName);
+
+    Swal.fire({
+        icon: 'success',
+        title: 'ส่งออก Excel สำเร็จ',
+        text: `ดาวน์โหลดไฟล์ ${fileName} เรียบร้อยแล้ว`,
+        timer: 2000,
+        showConfirmButton: false
+    });
+}
+
+// 📄 ส่งออก CSV รายงานเด็กที่พบ
+function exportFoundChildReportCsv() {
+    if (!window.FOUND_CHILDREN_REPORT_DATA || window.FOUND_CHILDREN_REPORT_DATA.length === 0) {
+        Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลสำหรับส่งออก', 'info');
+        return;
+    }
+
+    const headers = ['ลำดับ', 'วันที่พบ_ติดตาม', 'สถานพยาบาล', 'หมู่บ้านที่พบ', 'CID', 'HN', 'ชื่อ_สกุล_เด็ก', 'วัคซีน', 'ผลการติดตาม', 'หมายเหตุ', 'GPS', 'ผู้รายงาน'];
+    const rows = [headers.join(',')];
+
+    window.FOUND_CHILDREN_REPORT_DATA.forEach((r, i) => {
+        const clean = str => '"' + String(str || '').replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"';
+        rows.push([
+            i + 1,
+            clean(r.VisitDate),
+            clean(getFacilityDisplayName(r.hcode || '')),
+            clean(r.Village),
+            clean(r.ChildId ? "'" + r.ChildId : ''),
+            clean(r.HN),
+            clean(r.ChildName),
+            clean(r.Vaccine),
+            clean(r.Status),
+            clean(r.Remarks),
+            clean(r.GPS),
+            clean(r.Reporter)
+        ].join(','));
+    });
+
+    const csvContent = '\uFEFF' + rows.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'รายงานเด็กที่พบ_' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// Helper: ดึง GPS ภายใน Modal
+function getModalGPS(targetInputId) {
+    if (!navigator.geolocation) {
+        Swal.fire('แจ้งเตือน', 'อุปกรณ์นี้ไม่รองรับการระบุพิกัด GPS', 'warning');
+        return;
+    }
+    const input = document.getElementById(targetInputId);
+    if (input) input.value = 'กำลังดึงพิกัด...';
+
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {
+            if (input) {
+                input.value = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`;
+            }
+        },
+        (err) => {
+            if (input) input.value = '';
+            Swal.fire('พิกัดผิดพลาด', 'ไม่สามารถดึงพิกัด GPS ได้ กรุณาเปิด Location Service: ' + err.message, 'error');
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+}
+
+// ============================================================
 // 🌟 รายงานกลุ่มเป้าหมายวัคซีน PCV (เด็กที่เกิดตั้งแต่ 1 ต.ค. 2568 เป็นต้นมา)
 // ============================================================
 function debounce(fn, delay) {
@@ -30818,7 +31757,7 @@ window.exportDtpBySchoolExcel = async function() {
             // ดึงจาก VCC_tracking ที่มี Status หรือ Remarks บ่งชี้ว่าย้ายที่อยู่ หรือปฏิเสธวัคซีน
             const { data: trackRows, error: te } = await supabaseClient.from('VCC_tracking')
                 .select('ChildId, ChildName, Village, Status, Remarks, Reporter, VisitDate, Timestamp')
-                .or('Status.ilike.%ย้าย%,Status.ilike.%ปฏิเสธ%,Remarks.ilike.%ย้าย%,Remarks.ilike.%ปฏิเสธ%')
+                .or('Status.ilike.*ย้าย*,Status.ilike.*ปฏิเสธ*,Remarks.ilike.*ย้าย*,Remarks.ilike.*ปฏิเสธ*')
                 .order('Timestamp', { ascending: false })
                 .limit(1000);
             if (te) throw te;
