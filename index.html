@@ -6156,7 +6156,9 @@
             let hcode = '';
             let subdistrict = '';
 
-            if (args[0] && (args[0] === 'Admin_HOS' || args[0] === 'Admin_Ampur' || args[0] === 'เจ้าหน้าที่' || args[0] === 'อสม.')) {
+            const firstArg = String(args[0] || '').trim();
+            const firstArgNorm = firstArg.toLowerCase();
+            if (firstArgNorm === 'admin_hos' || firstArgNorm === 'admin_ampur' || firstArgNorm === 'admin' || firstArgNorm === 'เจ้าหน้าที่' || firstArgNorm === 'อสม.') {
                 role = args[0];
                 hcode = args[1] || '';
             } else if (typeof args[0] === 'string' && args[0] && args[0] !== 'ทั้งหมด') {
@@ -6181,7 +6183,7 @@
 
             const { data, error } = await query;
             if (error) throw error;
-            const villages = (data || []).map(v => {
+            let villages = (data || []).map(v => {
                 const rowHcode = v.hcode ? String(v.hcode).trim() : '-';
                 return {
                     id: v.id,
@@ -6196,6 +6198,50 @@
                     icon: v.icon || 'fa-home'
                 };
             });
+
+            // 🌟 Fallback: หากตาราง villages ไม่มีข้อมูลสำหรับสถานพยาบาลนี้ ให้ดึงรายชื่อหมู่จากตาราง data
+            if (villages.length === 0 && hcode && hcode !== 'ทั้งหมด') {
+                try {
+                    const unp = hcNorm;
+                    const pad = String(hcode).padStart(5, '0');
+                    const { data: dData, error: dErr } = await supabaseClient
+                        .from('data')
+                        .select('moo, villname, village_no, village_name, hcode')
+                        .or(`hcode.eq.${hcode},hcode.eq.${unp},hcode.eq.${pad}`);
+
+                    if (!dErr && dData && dData.length > 0) {
+                        const vMap = new Map();
+                        dData.forEach(r => {
+                            const m = String(r.moo || r.village_no || '').trim();
+                            const vName = String(r.villname || r.village_name || '').trim();
+                            if (m && m !== '-' && m !== '0') {
+                                const displayName = (vName && vName !== '-' && vName !== '0') ? ('หมู่ที่ ' + m + ' ' + vName) : ('หมู่ที่ ' + m);
+                                if (!vMap.has(m)) {
+                                    vMap.set(m, { no: m, name: displayName, rawName: vName || displayName });
+                                }
+                            }
+                        });
+                        const sortedKeys = Array.from(vMap.keys()).sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+                        villages = sortedKeys.map(k => {
+                            const item = vMap.get(k);
+                            return {
+                                no: item.no,
+                                village_no: item.no,
+                                name: item.name,
+                                village_name: item.name,
+                                subdistrict: '-',
+                                hcode: hcode,
+                                hname: getFacilityDisplayName(hcode),
+                                color: '#0284c7',
+                                icon: 'fa-home'
+                            };
+                        });
+                    }
+                } catch (fallbackErr) {
+                    console.warn('getVillages fallback from data error:', fallbackErr);
+                }
+            }
+
             return { success: true, villages };
         }
 
@@ -6649,7 +6695,12 @@
             });
 
             if (filters.village && filters.village !== 'ทั้งหมด') {
-                children = children.filter(c => c.village === filters.village || c.villageName === filters.village);
+                const vilN = String(filters.village).trim().toLowerCase();
+                children = children.filter(c => {
+                    const cv = String(c.villageName || '').trim().toLowerCase();
+                    const cm = String(c.village || '').trim().toLowerCase();
+                    return cv === vilN || cm === vilN || cv.includes(vilN) || vilN.includes(cv) || ('หมู่ที่ ' + cm) === vilN || ('หมู่ ' + cm) === vilN || vilN.includes('หมู่ที่ ' + cm) || vilN.includes('หมู่ ' + cm);
+                });
             }
             if (filters.status && filters.status !== 'ทั้งหมด') {
                 children = children.filter(c => c.status === filters.status);
@@ -15183,6 +15234,66 @@ function updateBottomNavActive(page) {
                 });
             }
 
+            // ✅ Client-side Guard: กรองหมู่บ้านสำหรับ อสม. — เห็นเฉพาะหมู่บ้านตัวเอง
+            if (APP.currentUser && APP.currentUser.role === 'อสม.' &&
+                APP.currentUser.village && String(APP.currentUser.village).trim() !== '-' && String(APP.currentUser.village).trim() !== '') {
+                const myVill = String(APP.currentUser.village).trim().toLowerCase();
+                childrenList = childrenList.filter(function(c) {
+                    const cv = String(c.villageName || c.village_name || '').trim().toLowerCase();
+                    const cm = String(c.village || c.moo || '').trim().toLowerCase();
+                    return cv.includes(myVill) || myVill.includes(cv) || cm === myVill || cm.includes(myVill);
+                });
+            }
+
+            // 🌟 Dynamic Village Extractor สำหรับรายชื่อเด็ก (cVillage):
+            // หาก dropdown cVillage มีตัวเลือกเพียงแค่ "ทั้งหมด" (ไม่มีหมู่ให้เลือก) 
+            // ให้รวบรวมหมู่บ้านทั้งหมดที่มีจริงในข้อมูลเด็กของสถานพยาบาลนี้แล้วเติมเข้า dropdown อัตโนมัติ
+            const cVilSelect = document.getElementById('cVillage');
+            const isChildrenUserVHV = APP.currentUser && APP.currentUser.role === 'อสม.';
+            if (cVilSelect && !isChildrenUserVHV && cVilSelect.options.length <= 1 && childrenList.length > 0) {
+                const vMap = new Map();
+                childrenList.forEach(function(c) {
+                    const m = String(c.village || '').trim();
+                    const vn = String(c.villageName || '').trim();
+                    if (m && m !== '-' && m !== '0') {
+                        const displayName = (vn && vn !== '-' && vn !== '0' && !vn.includes('หมู่'))
+                            ? ('หมู่ที่ ' + m + ' ' + vn)
+                            : (vn && vn !== '-' ? vn : ('หมู่ที่ ' + m));
+                        const val = vn && vn !== '-' ? vn : displayName;
+                        if (!vMap.has(m)) {
+                            vMap.set(m, { val: val, label: displayName, no: Number(m) || 999 });
+                        }
+                    } else if (vn && vn !== '-' && vn !== '0') {
+                        if (!vMap.has(vn)) {
+                            vMap.set(vn, { val: vn, label: vn, no: 999 });
+                        }
+                    }
+                });
+                if (vMap.size > 0) {
+                    const sorted = Array.from(vMap.values()).sort((a, b) => a.no - b.no);
+                    const curVal = cVilSelect.value;
+                    let optsHtml = '<option value="ทั้งหมด">ทั้งหมด</option>';
+                    sorted.forEach(function(item) {
+                        optsHtml += '<option value="' + esc(item.val) + '">' + esc(item.label) + '</option>';
+                    });
+                    cVilSelect.innerHTML = optsHtml;
+                    if (curVal && curVal !== 'ทั้งหมด') cVilSelect.value = curVal;
+                }
+            }
+
+            // ✅ Client-side Village filter: กรองตาม dropdown cVillage
+            const selVillage = document.getElementById('cVillage') ? document.getElementById('cVillage').value : 'ทั้งหมด';
+            if (selVillage && selVillage !== 'ทั้งหมด') {
+                const selVNorm = selVillage.trim().toLowerCase();
+                childrenList = childrenList.filter(function(c) {
+                    const cv = String(c.villageName || c.village_name || '').trim().toLowerCase();
+                    const cm = String(c.village || c.moo || '').trim().toLowerCase();
+                    return cv === selVNorm || cm === selVNorm || cv.includes(selVNorm) || selVNorm.includes(cv) ||
+                           ('หมู่ที่ ' + cm) === selVNorm || ('หมู่ ' + cm) === selVNorm ||
+                           selVNorm.includes('หมู่ที่ ' + cm) || selVNorm.includes('หมู่ ' + cm);
+                });
+            }
+
             // filter age
             childrenList = childrenList.filter(function(c) {
                 const m = parseAgeToMonths(c.age);
@@ -15678,7 +15789,19 @@ function updateBottomNavActive(page) {
             ]);
             
             APP.facilityMap = updateFacilityMap(fRes.success ? fRes.map : {});
-            const villages = vRes.success ? vRes.villages : [];
+            let villages = vRes.success ? (vRes.villages || []) : [];
+            if ((!villages || villages.length === 0) && APP.currentUser && APP.currentUser.hcode && typeof getOfficerVillagesForFacility === 'function') {
+                const fbList = await getOfficerVillagesForFacility(APP.currentUser.hcode);
+                if (fbList && fbList.length > 0) {
+                    villages = fbList.map(v => ({
+                        name: v.name,
+                        village_name: v.name,
+                        village_no: v.no,
+                        hcode: APP.currentUser.hcode
+                    }));
+                }
+            }
+            APP.villagesCache = villages;
             hideLoading();
 
             const facilityOptions = buildFacilityDropdownOptions('ทั้งหมด', '-- ทั้งหมด --');
@@ -15774,6 +15897,17 @@ function updateBottomNavActive(page) {
                 }
             }
 
+            if (mVillageEl && !isVHV) {
+                mVillageEl.addEventListener('change', doMissingSearch);
+            }
+            const mFacEl = document.getElementById('mFacility');
+            if (mFacEl) {
+                mFacEl.addEventListener('change', function() {
+                    cascadeVillageOptions(this.value, 'mVillage');
+                    doMissingSearch();
+                });
+            }
+
             document.getElementById('mSearchBtn').addEventListener('click', doMissingSearch);
             document.getElementById('mResetBtn').addEventListener('click', function() {
                 const mFac = document.getElementById('mFacility');
@@ -15851,7 +15985,67 @@ function updateBottomNavActive(page) {
                 });
             }
 
-            if (!result.success || !result.children || result.children.length === 0) {
+            // ✅ Client-side Guard: กรองหมู่บ้านสำหรับ อสม. — เห็นเฉพาะหมู่บ้านตัวเอง
+            if (APP.currentUser && APP.currentUser.role === 'อสม.' &&
+                APP.currentUser.village && String(APP.currentUser.village).trim() !== '-' && String(APP.currentUser.village).trim() !== '') {
+                const myVill = String(APP.currentUser.village).trim().toLowerCase();
+                childrenList = childrenList.filter(function(c) {
+                    const cv = String(c.villageName || c.village_name || '').trim().toLowerCase();
+                    const cm = String(c.village || c.moo || '').trim().toLowerCase();
+                    return cv.includes(myVill) || myVill.includes(cv) || cm === myVill || cm.includes(myVill);
+                });
+            }
+
+            // 🌟 Dynamic Village Extractor สำหรับเด็กขาดนัด (mVillage):
+            // หาก dropdown mVillage มีตัวเลือกเพียงแค่ "ทั้งหมด" (ไม่มีหมู่ให้เลือก) 
+            // ให้รวบรวมหมู่บ้านทั้งหมดที่มีจริงในข้อมูลเด็กขาดนัดของสถานพยาบาลนี้แล้วเติมเข้า dropdown อัตโนมัติ
+            const mVilSelect = document.getElementById('mVillage');
+            const isMissingUserVHV = APP.currentUser && APP.currentUser.role === 'อสม.';
+            if (mVilSelect && !isMissingUserVHV && mVilSelect.options.length <= 1 && childrenList.length > 0) {
+                const vMap = new Map();
+                childrenList.forEach(function(c) {
+                    const m = String(c.village || '').trim();
+                    const vn = String(c.villageName || '').trim();
+                    if (m && m !== '-' && m !== '0') {
+                        const displayName = (vn && vn !== '-' && vn !== '0' && !vn.includes('หมู่'))
+                            ? ('หมู่ที่ ' + m + ' ' + vn)
+                            : (vn && vn !== '-' ? vn : ('หมู่ที่ ' + m));
+                        const val = vn && vn !== '-' ? vn : displayName;
+                        if (!vMap.has(m)) {
+                            vMap.set(m, { val: val, label: displayName, no: Number(m) || 999 });
+                        }
+                    } else if (vn && vn !== '-' && vn !== '0') {
+                        if (!vMap.has(vn)) {
+                            vMap.set(vn, { val: vn, label: vn, no: 999 });
+                        }
+                    }
+                });
+                if (vMap.size > 0) {
+                    const sorted = Array.from(vMap.values()).sort((a, b) => a.no - b.no);
+                    const curVal = mVilSelect.value;
+                    let optsHtml = '<option value="ทั้งหมด">ทั้งหมด</option>';
+                    sorted.forEach(function(item) {
+                        optsHtml += '<option value="' + esc(item.val) + '">' + esc(item.label) + '</option>';
+                    });
+                    mVilSelect.innerHTML = optsHtml;
+                    if (curVal && curVal !== 'ทั้งหมด') mVilSelect.value = curVal;
+                }
+            }
+
+            // ✅ Client-side Village filter: กรองตาม dropdown mVillage
+            const selVillage = document.getElementById('mVillage') ? document.getElementById('mVillage').value : 'ทั้งหมด';
+            if (selVillage && selVillage !== 'ทั้งหมด') {
+                const selVNorm = selVillage.trim().toLowerCase();
+                childrenList = childrenList.filter(function(c) {
+                    const cv = String(c.villageName || c.village_name || '').trim().toLowerCase();
+                    const cm = String(c.village || c.moo || '').trim().toLowerCase();
+                    return cv === selVNorm || cm === selVNorm || cv.includes(selVNorm) || selVNorm.includes(cv) ||
+                           ('หมู่ที่ ' + cm) === selVNorm || ('หมู่ ' + cm) === selVNorm ||
+                           selVNorm.includes('หมู่ที่ ' + cm) || selVNorm.includes('หมู่ ' + cm);
+                });
+            }
+
+            if (childrenList.length === 0) {
                 APP.missingAllRecords = [];
                 initDT('missingTable', {
                     data: [],
@@ -15862,8 +16056,8 @@ function updateBottomNavActive(page) {
                     columnDefs: [{ orderable: false, targets: [0, 10] }]
                 });
             } else {
-                APP.missingAllRecords = result.children;
-                const mTableRows = result.children.map(function(c) {
+                APP.missingAllRecords = childrenList;
+                const mTableRows = childrenList.map(function(c) {
                     const statusOpts = ['\u0E15\u0E32\u0E21\u0E19\u0E31\u0E14\u0E1B\u0E01\u0E15\u0E34', '\u0E02\u0E32\u0E14\u0E19\u0E31\u0E14', '\u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18\u0E27\u0E31\u0E04\u0E0B\u0E35\u0E19'].map(function(s) {
                         return '<option value="' + s + '">' + s + '</option>';
                     });
@@ -22274,17 +22468,34 @@ window.confirmClearOldAppointments = async function() {
         const vilSelect = document.getElementById(targetDropdownId);
         if (!vilSelect) return;
         
-        
         // กรองข้อมูลหมู่บ้านจาก Cache ที่โหลดมาเก็บไว้
         let filtered = APP.villagesCache || [];
         if (hcode && hcode !== 'ทั้งหมด') {
-            filtered = filtered.filter(v => v.hcode === hcode);
+            const hNorm = String(hcode).replace(/^0+/, '');
+            filtered = filtered.filter(v => {
+                const vNorm = String(v.hcode || '').replace(/^0+/, '');
+                return vNorm === hNorm;
+            });
         }
         
-        let html = '<option value="ทั้งหมด">-- ทั้งหมด --</option>';
-        html += filtered.map(v => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+        let html = '<option value="ทั้งหมด">ทั้งหมด</option>';
+        html += filtered.map(v => {
+            const vName = v.village_name || v.name || '';
+            return `<option value="${esc(vName)}">${esc(vName)}</option>`;
+        }).join('');
         
         vilSelect.innerHTML = html;
+
+        // ถ้าแคชไม่มีและเลือกสถานพยาบาลเฉพาะ ให้ดึงผ่าน getOfficerVillagesForFacility
+        if (filtered.length === 0 && hcode && hcode !== 'ทั้งหมด' && typeof getOfficerVillagesForFacility === 'function') {
+            getOfficerVillagesForFacility(hcode).then(vList => {
+                if (vList && vList.length > 0) {
+                    let newHtml = '<option value="ทั้งหมด">ทั้งหมด</option>';
+                    newHtml += vList.map(v => `<option value="${esc(v.rawName || v.name)}">${esc(v.name)}</option>`).join('');
+                    vilSelect.innerHTML = newHtml;
+                }
+            });
+        }
     };
     // ============================================================
     // AUTO LOGOUT (30 MINUTES INACTIVITY)
