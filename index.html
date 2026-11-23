@@ -6206,14 +6206,14 @@
                     const pad = String(hcode).padStart(5, '0');
                     const { data: dData, error: dErr } = await supabaseClient
                         .from('data')
-                        .select('moo, villname, village_no, village_name, hcode')
+                        .select('moo, villname, hcode')
                         .or(`hcode.eq.${hcode},hcode.eq.${unp},hcode.eq.${pad}`);
 
                     if (!dErr && dData && dData.length > 0) {
                         const vMap = new Map();
                         dData.forEach(r => {
-                            const m = String(r.moo || r.village_no || '').trim();
-                            const vName = String(r.villname || r.village_name || '').trim();
+                            const m = String(r.moo || '').trim();
+                            const vName = String(r.villname || '').trim();
                             if (m && m !== '-' && m !== '0') {
                                 const displayName = (vName && vName !== '-' && vName !== '0') ? ('หมู่ที่ ' + m + ' ' + vName) : ('หมู่ที่ ' + m);
                                 if (!vMap.has(m)) {
@@ -19463,6 +19463,9 @@ function updateBottomNavActive(page) {
         const padHc = String(hcode).padStart(5, '0');
 
         let villages = [];
+        const seenMoo = new Set();
+        const seenNames = new Set();
+
         try {
             // 1. ดึงจากตาราง villages ของสถานพยาบาลนี้
             const { data, error } = await supabaseClient
@@ -19472,52 +19475,49 @@ function updateBottomNavActive(page) {
                 .order('village_no', { ascending: true });
 
             if (!error && data && data.length > 0) {
-                const seen = new Set();
                 data.forEach(v => {
                     const no = String(v.village_no || v.no || '').trim();
                     const name = String(v.village_name || v.name || '').trim();
                     const displayName = name ? (name.includes('หมู่') ? name : ('หมู่ที่ ' + no + ' ' + name).trim()) : ('หมู่ที่ ' + no);
-                    if (displayName && !seen.has(displayName)) {
-                        seen.add(displayName);
-                        villages.push({ no: no, name: displayName, rawName: name });
-                    }
+                    if (no && no !== '-' && no !== '0') seenMoo.add(no);
+                    if (name && name !== '-' && name !== '0') seenNames.add(name);
+                    villages.push({ no: no, name: displayName, rawName: name, hcode: v.hcode });
                 });
             }
         } catch (e) {
             console.warn('getOfficerVillagesForFacility table villages error:', e);
         }
 
-        // 2. หากในตาราง villages ไม่มี ให้รวบรวมจากตาราง data ของสถานพยาบาลนี้
-        if (villages.length === 0) {
-            try {
-                const { data: cData, error: cErr } = await supabaseClient
-                    .from('data')
-                    .select('moo, villname, village_no, village_name, hcode')
-                    .or('hcode.eq.' + hcode + ',hcode.eq.' + unpHc + ',hcode.eq.' + padHc);
+        // 2. ดึงจากตาราง data ของสถานพยาบาลนี้มาผสานเพิ่มเติม (ป้องกันกรณีตาราง villages บันทึกไว้ไม่ครบทุกหมู่)
+        try {
+            const { data: cData, error: cErr } = await supabaseClient
+                .from('data')
+                .select('moo, villname, hcode')
+                .or('hcode.eq.' + hcode + ',hcode.eq.' + unpHc + ',hcode.eq.' + padHc);
 
-                if (!cErr && cData && cData.length > 0) {
-                    const vMap = new Map();
-                    cData.forEach(r => {
-                        const m = String(r.moo || r.village_no || '').trim();
-                        const vName = String(r.villname || r.village_name || '').trim();
-                        if (m && m !== '-' && m !== '0') {
-                            const displayName = (vName && vName !== '-' && vName !== '0') ? ('หมู่ที่ ' + m + ' ' + vName) : ('หมู่ที่ ' + m);
-                            if (!vMap.has(m)) {
-                                vMap.set(m, displayName);
-                            }
+            if (!cErr && cData && cData.length > 0) {
+                const vMap = new Map();
+                cData.forEach(r => {
+                    const m = String(r.moo || '').trim();
+                    const vName = String(r.villname || '').trim();
+                    if (m && m !== '-' && m !== '0' && !seenMoo.has(m)) {
+                        const displayName = (vName && vName !== '-' && vName !== '0' && !vName.includes('หมู่')) ? ('หมู่ที่ ' + m + ' ' + vName) : ('หมู่ที่ ' + m + (vName && vName !== '-' ? ' ' + vName : ''));
+                        if (!vMap.has(m)) {
+                            vMap.set(m, { no: m, name: displayName, rawName: vName || displayName });
                         }
-                    });
-                    const sortedKeys = Array.from(vMap.keys()).sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
-                    villages = sortedKeys.map(k => ({
-                        no: k,
-                        name: vMap.get(k),
-                        rawName: vMap.get(k)
-                    }));
-                }
-            } catch (e2) {
-                console.warn('fallback villages from data error:', e2);
+                    }
+                });
+                vMap.forEach(item => {
+                    seenMoo.add(item.no);
+                    villages.push({ no: item.no, name: item.name, rawName: item.rawName, hcode: hcode });
+                });
             }
+        } catch (e2) {
+            console.warn('fallback villages from data error:', e2);
         }
+
+        // เรียงลำดับตามหมายเลขหมู่
+        villages.sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0));
 
         return villages;
     }
@@ -22478,20 +22478,27 @@ window.confirmClearOldAppointments = async function() {
             });
         }
         
+        filtered.sort((a, b) => (Number(a.village_no || a.no) || 0) - (Number(b.village_no || b.no) || 0));
+
         let html = '<option value="ทั้งหมด">ทั้งหมด</option>';
         html += filtered.map(v => {
             const vName = v.village_name || v.name || '';
-            return `<option value="${esc(vName)}">${esc(vName)}</option>`;
+            const no = v.village_no || v.no;
+            const label = (no && no !== '-' && no !== '0' && !vName.includes('หมู่')) ? ('หมู่ที่ ' + no + ' ' + vName) : vName;
+            return `<option value="${esc(vName)}">${esc(label)}</option>`;
         }).join('');
         
         vilSelect.innerHTML = html;
 
-        // ถ้าแคชไม่มีและเลือกสถานพยาบาลเฉพาะ ให้ดึงผ่าน getOfficerVillagesForFacility
-        if (filtered.length === 0 && hcode && hcode !== 'ทั้งหมด' && typeof getOfficerVillagesForFacility === 'function') {
+        // ดึงจาก getOfficerVillagesForFacility เพิ่มเติมเพื่อให้ได้รายชื่อหมู่บ้านครบถ้วนที่สุด
+        if (hcode && hcode !== 'ทั้งหมด' && typeof getOfficerVillagesForFacility === 'function') {
             getOfficerVillagesForFacility(hcode).then(vList => {
-                if (vList && vList.length > 0) {
+                if (vList && vList.length > 0 && (filtered.length === 0 || vList.length > filtered.length)) {
                     let newHtml = '<option value="ทั้งหมด">ทั้งหมด</option>';
-                    newHtml += vList.map(v => `<option value="${esc(v.rawName || v.name)}">${esc(v.name)}</option>`).join('');
+                    newHtml += vList.map(v => {
+                        const val = v.rawName || v.name;
+                        return `<option value="${esc(val)}">${esc(v.name)}</option>`;
+                    }).join('');
                     vilSelect.innerHTML = newHtml;
                 }
             });
