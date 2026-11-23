@@ -12749,8 +12749,7 @@ async function warmUpBackend() {
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
                 { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
                 { sep: 'Field Operations' },
-                { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'อสม. บันทึกผลติดตาม', badge: 'มือถือ' },
-                { id: 'jhcisFeedback', icon: 'fas fa-file-export', label: 'ส่งออกย้าย/ปฏิเสธ → JHCIS' }
+                { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'อสม. บันทึกผลติดตาม', badge: 'มือถือ' }
             ];
         } else if (role === 'เจ้าหน้าที่') {
             items = [
@@ -12771,8 +12770,7 @@ async function warmUpBackend() {
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
                 { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
                 { sep: 'Field Operations' },
-                { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'อสม. บันทึกผลติดตาม', badge: 'มือถือ' },
-                { id: 'jhcisFeedback', icon: 'fas fa-file-export', label: 'ส่งออกย้าย/ปฏิเสธ → JHCIS' }
+                { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'อสม. บันทึกผลติดตาม', badge: 'มือถือ' }
             ];
         } else {
             items = [
@@ -26696,19 +26694,57 @@ async function loadFoundChildReportData() {
     const dateFrom = document.getElementById('fcrDateFrom') ? document.getElementById('fcrDateFrom').value : '';
     const dateTo = document.getElementById('fcrDateTo') ? document.getElementById('fcrDateTo').value : '';
 
+    const isAmpur = (typeof isAdminAmpurUser === 'function' && isAdminAmpurUser()) || (typeof isSpecialOfficerUser === 'function' && isSpecialOfficerUser());
+    const myUser = String(APP.currentUser ? (APP.currentUser.username || '') : '').trim();
+    const myName = String(APP.currentUser ? (APP.currentUser.fullname || APP.currentUser.name || '') : '').trim();
+    const myHcode = String(APP.currentUser ? (APP.currentUser.hcode || '') : '').trim();
+
     try {
         let q = supabaseClient.from('VCC_tracking').select('*').order('Timestamp', { ascending: false }).limit(2000);
 
         if (dateFrom) q = q.gte('VisitDate', dateFrom);
         if (dateTo) q = q.lte('VisitDate', dateTo);
 
+        // 🔒 หากไม่ใช่ระดับอำเภอ: จำกัดสิทธิ์ให้แสดงเฉพาะของตัวเอง (ตรงกับ username หรือชื่อ-สกุลของผู้ใช้)
+        if (!isAmpur && (myUser || myName)) {
+            const orConds = [];
+            if (myUser) {
+                orConds.push(`Reporter.eq.${myUser}`);
+                orConds.push(`Reporter.ilike.*${myUser}*`);
+            }
+            if (myName) {
+                orConds.push(`Reporter.eq.${myName}`);
+                orConds.push(`Reporter.ilike.*${myName}*`);
+            }
+            if (orConds.length > 0) {
+                q = q.or(orConds.join(','));
+            }
+        }
+
         const { data, error } = await q;
         if (error) throw error;
 
-        let records = data || [];
+        let records = (data || []).filter(r => {
+            // กรองทิ้งแถวว่างที่ไม่มีทั้งชื่อเด็กและเลขบัตร
+            const cName = String(r.ChildName || '').trim();
+            const cId = String(r.ChildId || '').trim();
+            if ((!cName || cName === '-') && (!cId || cId === '0' || cId === '-')) {
+                return false;
+            }
+            return true;
+        });
 
-        // กรองความเกี่ยวข้อง: ดึงเฉพาะรายการที่มีแท็กเด็กที่พบ หรือผลการติดตามที่เกี่ยวกับเด็กนอกเขต/ย้าย/ฉีดที่อื่น
-        // หรือถ้าผู้ใช้เลือกกรอง ให้กรองตามเงื่อนไข
+        // 🔒 กรองสิทธิ์แสดงเฉพาะของตัวเอง (Double-check ฝั่ง JavaScript)
+        if (!isAmpur && (myUser || myName)) {
+            const u = myUser.toLowerCase();
+            const n = myName.toLowerCase();
+            records = records.filter(r => {
+                const rep = String(r.Reporter || '').trim().toLowerCase();
+                return (u && (rep === u || rep.includes(u))) || (n && (rep === n || rep.includes(n)));
+            });
+        }
+
+        // กรองหมู่บ้าน (ถ้าเลือก)
         if (selectedVil && selectedVil !== 'ทั้งหมด') {
             const vilNorm = selectedVil.trim().toLowerCase();
             records = records.filter(r => {
@@ -26717,9 +26753,39 @@ async function loadFoundChildReportData() {
             });
         }
 
+        // กรองสถานะ (ถ้าเลือก)
         if (selectedStatus && selectedStatus !== 'ทั้งหมด') {
             records = records.filter(r => String(r.Status || '').trim() === selectedStatus.trim());
         }
+
+        // 🔍 ดึงข้อมูลเด็กจากตาราง data เพื่อเติม HN และ สถานพยาบาล ให้ถูกต้อง ไม่แสดงเป็น '-'
+        const cids = [...new Set(records.map(r => r.ChildId).filter(id => id && id > 0))];
+        const childMap = new Map();
+        if (cids.length > 0) {
+            for (let c = 0; c < cids.length; c += 100) {
+                const chunk = cids.slice(c, c + 100);
+                try {
+                    const { data: cRows } = await supabaseClient.from('data').select('CID, HN, hcode, hname, moo, villname').in('CID', chunk);
+                    (cRows || []).forEach(row => {
+                        if (row.CID) childMap.set(String(row.CID).trim(), row);
+                    });
+                } catch(eMap) {
+                    console.warn('lookup childMap error:', eMap);
+                }
+            }
+        }
+
+        // ผสานข้อมูล childData เข้ากับ record
+        records = records.map(r => {
+            const cidStr = String(r.ChildId || '').trim();
+            const cd = childMap.get(cidStr) || {};
+            return {
+                ...r,
+                HN: r.HN || cd.HN || '-',
+                hcode: r.hcode || cd.hcode || (r.Remarks && r.Remarks.match(/0\d{4}/) ? r.Remarks.match(/0\d{4}/)[0] : (APP.currentUser ? APP.currentUser.hcode : '')),
+                Village: (r.Village && r.Village !== '-') ? r.Village : (cd.villname ? `หมู่ที่ ${cd.moo || ''} ${cd.villname}` : '-')
+            };
+        });
 
         window.FOUND_CHILDREN_REPORT_DATA = records;
 
@@ -26743,7 +26809,7 @@ async function loadFoundChildReportData() {
         if (elRef) elRef.innerHTML = `${refused} <span style="font-size:13px; font-weight:400; color:#64748b;">คน</span>`;
 
         if (records.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="13" class="no-data" style="text-align:center; padding:36px; color:#64748b;"><i class="fas fa-inbox" style="font-size:24px; color:#94a3b8; display:block; margin-bottom:8px;"></i> ยังไม่มีข้อมูลการติดตามเด็กที่พบในช่วงเวลานี้ สามารถค้นหาและเพิ่มได้จากกล่องค้นหาด้านบน</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="13" class="no-data" style="text-align:center; padding:36px; color:#64748b;"><i class="fas fa-inbox" style="font-size:24px; color:#94a3b8; display:block; margin-bottom:8px;"></i> ยังไม่มีข้อมูลการติดตามเด็กที่พบของท่าน สามารถค้นหาและเพิ่มได้จากกล่องค้นหาด้านบน</td></tr>';
             return;
         }
 
@@ -26756,12 +26822,13 @@ async function loadFoundChildReportData() {
             const statusBadge = `<span class="status-badge ${statusClass}">${esc(r.Status || '-')}</span>`;
 
             const childIdStr = String(r.ChildId || '-');
+            const facDisplay = r.hcode ? getFacilityDisplayName(r.hcode) : '-';
 
             return `
                 <tr>
                     <td style="text-align:center; color:#64748b;">${i + 1}</td>
                     <td style="font-size:12.5px;">${esc(r.VisitDate || (r.Timestamp ? r.Timestamp.slice(0, 10) : '-'))}</td>
-                    <td style="font-size:12.5px; color:#0369a1; font-weight:500;">${esc(getFacilityDisplayName(r.hcode || ''))}</td>
+                    <td style="font-size:12.5px; color:#0369a1; font-weight:500;">${esc(facDisplay)}</td>
                     <td style="font-size:12.5px;">${esc(r.Village || '-')}</td>
                     <td style="font-family:monospace; font-size:12.5px; color:#0284c7;">${esc(childIdStr)}</td>
                     <td style="font-family:monospace; font-size:12px;">${esc(r.HN || '-')}</td>
@@ -26770,7 +26837,7 @@ async function loadFoundChildReportData() {
                     <td>${statusBadge}</td>
                     <td style="font-size:12px; max-width:200px; white-space:normal;">${esc(r.Remarks || '-')}</td>
                     <td style="font-size:12px;">${gpsLink}</td>
-                    <td style="font-size:12px; color:#475569;">${esc(r.Reporter || '-')}</td>
+                    <td style="font-size:12px; color:#475569;"><i class="fas fa-user-check" style="color:#10b981;"></i> ${esc(r.Reporter || '-')}</td>
                     <td style="text-align:center;">
                         <button class="action-btn view" title="ดูประวัติเด็ก" onclick="viewChildFromMap('${esc(childIdStr)}')">
                             <i class="fas fa-eye"></i>
@@ -26792,6 +26859,7 @@ async function loadFoundChildReportData() {
         tbody.innerHTML = '<tr><td colspan="13" class="no-data" style="color:#dc2626; text-align:center;">เกิดข้อผิดพลาดในการโหลดรายงาน: ' + esc(err.message) + '</td></tr>';
     }
 }
+
 
 // 📥 ส่งออก Excel รายงานเด็กที่พบ
 function exportFoundChildReportExcel() {
