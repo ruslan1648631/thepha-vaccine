@@ -5965,6 +5965,13 @@
                     Role: user.role || 'เจ้าหน้าที่',
                     hcode: user.hcode ? String(user.hcode).trim() : '-'
                 };
+                if (user.village) updatePayload.Village = user.village;
+                if (user.subdistrict) updatePayload.Subdistrict = user.subdistrict;
+                if (user.status) updatePayload.Status = user.status;
+                if (user.username && String(user.username).trim() !== origUsername) {
+                    updatePayload.Username = String(user.username).trim();
+                }
+
 
                 if (user.password && String(user.password).trim() !== '') {
                     let pwd = String(user.password).trim();
@@ -14672,7 +14679,9 @@ function updateBottomNavActive(page) {
             document.getElementById('userModalOriginal').value = username;
             document.getElementById('userModalId').value = u.id || '';
             document.getElementById('um_username').value = u.username;
-            document.getElementById('um_username').disabled = true;
+            const isNonEnglish = !/^[a-zA-Z0-9_]+$/.test(u.username || '');
+            document.getElementById('um_username').disabled = !isNonEnglish;
+            if (isNonEnglish) { document.getElementById('um_username').style.border = '2px solid #f59e0b'; } else { document.getElementById('um_username').style.border = ''; }
             document.getElementById('um_password').value = '';
             document.getElementById('um_password').placeholder = 'เว้นว่างไว้หากไม่ต้องการเปลี่ยนรหัสผ่าน';
             document.getElementById('um_fullname').value = u.fullname;
