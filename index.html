@@ -22887,65 +22887,65 @@ window.confirmClearOldAppointments = async function() {
     // EDIT TRACKING RECORD MODAL
     // ============================================================
     window.onDeleteTrackingClick = async function(btn) {
-    try {
-        let itemStr = decodeURIComponent(btn.getAttribute('data-item') || '');
-        let item = JSON.parse(itemStr);
-        if (!item) return;
+        try {
+            let itemStr = decodeURIComponent(btn.getAttribute('data-item') || '');
+            let item = JSON.parse(itemStr);
+            if (!item) return;
 
-        let res = await Swal.fire({
-            title: 'ยืนยันการลบรายการติดตาม?',
-            html: \<div style="text-align:left;font-size:0.95rem;color:#475569;line-height:1.6;">
-                    <p><strong>ชื่อเด็ก:</strong> \</p>
-                    <p><strong>ผู้บันทึก:</strong> \</p>
-                    <p><strong>วันที่:</strong> \</p>
-                    <p style="color:#ef4444;margin-top:8px;">คำเตือน: ข้อมูลนี้จะถูกลบออกจากฐานข้อมูล VCC_tracking อย่างถาวร</p>
-                   </div>\,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#ef4444',
-            cancelButtonColor: '#94a3b8',
-            confirmButtonText: '<i class="fas fa-trash-alt me-1"></i> ลบรายการ',
-            cancelButtonText: 'ยกเลิก'
-        });
-
-        if (!res.isConfirmed) return;
-
-        showLoading('กำลังลบข้อมูลการติดตาม...');
-
-        // Delete from Supabase
-        if (typeof SUPABASE_CLIENT !== 'undefined' && SUPABASE_CLIENT) {
-            let q = SUPABASE_CLIENT.from('VCC_tracking').delete();
-            if (item.Timestamp) q = q.eq('Timestamp', item.Timestamp);
-            if (item.Reporter) q = q.eq('Reporter', item.Reporter);
-            if (item.ChildId) q = q.eq('ChildId', item.ChildId);
-            let { error } = await q;
-            if (error) throw error;
-        }
-
-        // Delete from local cache
-        if (APP.trackingData && Array.isArray(APP.trackingData)) {
-            APP.trackingData = APP.trackingData.filter(t => {
-                if (item.Timestamp && t.Timestamp === item.Timestamp && item.Reporter && t.Reporter === item.Reporter) return false;
-                if (item.ChildId && t.ChildId === item.ChildId && item.Timestamp && t.Timestamp === item.Timestamp) return false;
-                return true;
+            let res = await Swal.fire({
+                title: 'ยืนยันการลบรายการติดตาม?',
+                html: '<div style="text-align:left;font-size:0.95rem;color:#475569;line-height:1.6;">' +
+                        '<p><strong>ชื่อเด็ก:</strong> ' + (item.ChildName || '-') + '</p>' +
+                        '<p><strong>ผู้บันทึก:</strong> ' + (item.Reporter || '-') + '</p>' +
+                        '<p><strong>วันที่:</strong> ' + (formatDate(item.Timestamp) || '-') + '</p>' +
+                        '<p style="color:#ef4444;margin-top:8px;">คำเตือน: ข้อมูลนี้จะถูกลบออกจากฐานข้อมูล VCC_tracking อย่างถาวร</p>' +
+                       '</div>',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#ef4444',
+                cancelButtonColor: '#94a3b8',
+                confirmButtonText: '<i class="fas fa-trash-alt me-1"></i> ลบรายการ',
+                cancelButtonText: 'ยกเลิก'
             });
-        }
 
-        await logActivity('DELETE_TRACKING', \ลบประวัติการติดตาม \ (\)\);
-        hideLoading();
-        Swal.fire({ icon: 'success', title: 'ลบข้อมูลสำเร็จ', timer: 1500, showConfirmButton: false });
+            if (!res.isConfirmed) return;
 
-        if (typeof renderTrackingReportTable === 'function') {
-            renderTrackingReportTable();
-        } else if (typeof filterTrackingReport === 'function') {
-            filterTrackingReport();
+            showLoading('กำลังลบข้อมูลการติดตาม...');
+
+            // Delete from Supabase
+            if (typeof SUPABASE_CLIENT !== 'undefined' && SUPABASE_CLIENT) {
+                let q = SUPABASE_CLIENT.from('VCC_tracking').delete();
+                if (item.Timestamp) q = q.eq('Timestamp', item.Timestamp);
+                if (item.Reporter) q = q.eq('Reporter', item.Reporter);
+                if (item.ChildId) q = q.eq('ChildId', item.ChildId);
+                let { error } = await q;
+                if (error) throw error;
+            }
+
+            // Delete from local cache
+            if (APP.trackingData && Array.isArray(APP.trackingData)) {
+                APP.trackingData = APP.trackingData.filter(function(t) {
+                    if (item.Timestamp && t.Timestamp === item.Timestamp && item.Reporter && t.Reporter === item.Reporter) return false;
+                    if (item.ChildId && t.ChildId === item.ChildId && item.Timestamp && t.Timestamp === item.Timestamp) return false;
+                    return true;
+                });
+            }
+
+            await logActivity('DELETE_TRACKING', 'ลบประวัติการติดตาม ' + (item.ChildName || '') + ' (' + (item.ChildId || '') + ')');
+            hideLoading();
+            Swal.fire({ icon: 'success', title: 'ลบข้อมูลสำเร็จ', timer: 1500, showConfirmButton: false });
+
+            if (typeof renderTrackingReportTable === 'function') {
+                renderTrackingReportTable();
+            } else if (typeof filterTrackingReport === 'function') {
+                filterTrackingReport();
+            }
+        } catch (err) {
+            hideLoading();
+            console.error('Delete tracking error:', err);
+            Swal.fire('เกิดข้อผิดพลาด', err.message || 'ไม่สามารถลบข้อมูลได้', 'error');
         }
-    } catch (err) {
-        hideLoading();
-        console.error('Delete tracking error:', err);
-        Swal.fire('เกิดข้อผิดพลาด', err.message || 'ไม่สามารถลบข้อมูลได้', 'error');
-    }
-};
+    };
 window.onDeleteTrackingByIndex = async function(idx) {
     try {
         let list = (window._currentTrackingFilteredList || APP.trackingData || []);
