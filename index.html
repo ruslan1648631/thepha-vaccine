@@ -22412,7 +22412,7 @@ window.confirmClearOldAppointments = async function() {
         if (c1 && c2) {
             applyTheme(c1, c2);
         } else {
-            applyTheme('#E8846A', '#F4A490');
+            applyTheme('#E8846A', '#DCE8DF');
         }
     }
 
@@ -22423,7 +22423,7 @@ window.confirmClearOldAppointments = async function() {
             title: 'เลือกสีธีมที่ต้องการ',
             html: `
                 <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 15px;">
-<button onclick="applyTheme('#E8846A', '#F4A490')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #E8846A; background: linear-gradient(135deg, #E8846A, #F4A490); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Salmon (ค่าเริ่มต้น)"></button>
+                    <button onclick="applyTheme('#E8846A', '#DCE8DF')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #E8846A; background: linear-gradient(135deg, #E8846A, #DCE8DF); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="VetCare Warm Pastel (ตามแบบ)" aria-label="VetCare Theme"></button>
                     <button onclick="applyTheme('#0284c7', '#555555')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #fff; background: linear-gradient(135deg, #0284c7, #06b6d4); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"></button>
                     <button onclick="applyTheme('#28c76f', '#16a34a')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #fff; background: linear-gradient(135deg, #28c76f, #16a34a); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"></button>
                     <button onclick="applyTheme('#00cfe8', '#0284c7')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #fff; background: linear-gradient(135deg, #00cfe8, #0284c7); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"></button>
@@ -22454,6 +22454,8 @@ window.confirmClearOldAppointments = async function() {
         
         
         // สร้างชุดคำสั่ง CSS เพื่อเขียนทับ (Override) สีหลัก
+        // Tạoชุดคำสั่ง CSS เพื่อเขียนทับ (Override) สีหลัก
+        const isVet = (String(color1).toLowerCase() === '#e8846a' || String(color2).toLowerCase() === '#dce8df');
         styleEl.innerHTML = `
             /* Background Gradients */
             .login-page::before, 
@@ -22467,15 +22469,12 @@ window.confirmClearOldAppointments = async function() {
             
             /* Topbar สำหรับ Mobile */
             @media (max-width: 768px) {
-                .top-bar { background: linear-gradient(135deg, ${color1} 0%, ${color2} 100%) !important; }
+                .top-bar { background: ${color1} !important; color: #fff !important; }
+                .top-bar .top-bar-title { color: #fff !important; }
+                .menu-toggle { color: #fff !important; }
             }
             
-            /* Text & Borders */
-            .menu-item:hover, .menu-item.active {
-                border-left-color: ${color1} !important;
-                background: ${color1}25 !important;
-            }
-            
+            /* Text and Borders */
             .page-title i, 
             .stat-icon.blue, 
             .chart-card h4 i, 
@@ -22488,36 +22487,225 @@ window.confirmClearOldAppointments = async function() {
             }
             
             /* Action Buttons */
-            .btn-search-child, .btn-filter, .btn-rpt-search, .btn-submit, .rpt-count-tag, .rpt-mini-bar {
-                background: ${color1} !important;
-            }
-            .btn-search-child:hover, .btn-filter:hover, .btn-rpt-search:hover, .btn-submit:hover {
-                background: ${color2} !important;
-            }
-            
-            /* Mobile Bottom Nav */
-            .bottom-nav-item.active { color: ${color1} !important; }
-            .bottom-nav-item.active i {
-                background: ${color1}25 !important;
-                color: ${color1} !important;
+            .btn-search-child, .btn-filter, .btn-rpt-search, .btn-submit, .rpt-count-tag, .rpt-mini-bar, .swal2-confirm {
+                background: linear-gradient(135deg, ${color1} 0%, #F59E87 100%) !important;
+                color: #FFFFFF !important;
+                border: none !important;
+                box-shadow: 0 4px 14px rgba(232, 132, 106, 0.35) !important;
             }
             
             /* Form Inputs Outline */
-            .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            .form-group input:focus, .form-group select:focus, .form-group textarea:focus,
+            .filter-group input:focus, .filter-group select:focus {
                 border-color: ${color1} !important;
-                box-shadow: 0 0 0 3px ${color1}20 !important;
+                box-shadow: 0 0 0 3px ${color1}25 !important;
             }
-            .login-body .form-group input:focus + i { color: ${color1} !important; }
-            .btn-register:hover { border-color: ${color1} !important; color: ${color1} !important; }
-            
-            /* Info Box & Upload Area */
-            .modern-modal .info-box::before { background: linear-gradient(90deg, ${color1}, ${color2}) !important; }
-            .modern-modal .upload-area:hover { border-color: ${color1} !important; box-shadow: 0 8px 25px ${color1}15 !important; }
-            .modern-modal .upload-area.dragover { border-color: ${color1} !important; background: ${color1}10 !important; }
-            
-            /* SweetAlert2 Confirm Button Override */
-            .swal2-confirm { background-color: ${color1} !important; }
+
+            /* ============================================================ */
+            /* VetCare Inspired Warm Pastel Theme (Match User Reference)     */
+            /* ============================================================ */
+            body, .main-content, #coveragePage, .public-body {
+                background: #FBF6F0 !important;
+                color: #433D39 !important;
+            }
+
+            .top-bar {
+                background: #FBF6F0 !important;
+                border-bottom: 1px solid rgba(220, 205, 190, 0.5) !important;
+                box-shadow: 0 2px 10px rgba(180, 160, 145, 0.08) !important;
+            }
+            .top-bar-title {
+                color: #38322E !important;
+                font-weight: 700 !important;
+            }
+
+            /* Sidebar - Soft Sage Green */
+            .sidebar {
+                background: #DCE8DF !important;
+                color: #4A5A50 !important;
+                border-right: none !important;
+                box-shadow: 4px 0 20px rgba(160, 180, 165, 0.25) !important;
+            }
+            .sidebar-header {
+                background: transparent !important;
+                border-bottom: 1px solid rgba(130, 160, 140, 0.25) !important;
+                box-shadow: none !important;
+                padding: 22px 18px 18px !important;
+            }
+            .sidebar-header .s-icon {
+                background: #FFFFFF !important;
+                color: #E8846A !important;
+                box-shadow: 0 4px 12px rgba(180, 160, 145, 0.2) !important;
+                border-radius: 16px !important;
+            }
+            .sidebar-header h3 {
+                color: #324438 !important;
+                font-weight: 700 !important;
+            }
+            .sidebar-header h4 {
+                color: #556B5C !important;
+                font-weight: 500 !important;
+                font-size: 13px !important;
+            }
+            .sidebar-header p {
+                color: #728A7A !important;
+            }
+            .menu-section {
+                color: #7E9685 !important;
+                font-size: 11px !important;
+                font-weight: 700 !important;
+            }
+            .menu-item {
+                color: #485E4E !important;
+                border-radius: 14px !important;
+                margin: 4px 10px !important;
+                padding: 10px 14px !important;
+                font-weight: 500 !important;
+            }
+            .menu-item:hover {
+                background: rgba(255, 255, 255, 0.65) !important;
+                color: #26382C !important;
+                transform: translateX(4px) !important;
+            }
+            .menu-item.active {
+                background: #FFFFFF !important;
+                color: #324438 !important;
+                font-weight: 700 !important;
+                box-shadow: 0 4px 14px rgba(150, 175, 155, 0.35) !important;
+                border-left: 4px solid #E8846A !important;
+            }
+            .menu-item i {
+                color: #75927D !important;
+            }
+            .menu-item.active i, .menu-item:hover i {
+                color: #E8846A !important;
+            }
+
+            /* Cards - Soft Cream/White with Gentle 3D Shadow */
+            .stat-card, .chart-card, .map-container, .data-table, .rpt-table-card, .rpt-filter-card, .cv-header-card, .cv-card {
+                background: #FFFFFF !important;
+                border-radius: 20px !important;
+                border: 1px solid rgba(235, 225, 215, 0.8) !important;
+                box-shadow: 0 4px 18px rgba(190, 170, 155, 0.1) !important;
+            }
+            .stat-card:hover {
+                transform: translateY(-4px) !important;
+                box-shadow: 0 8px 25px rgba(190, 170, 155, 0.18) !important;
+            }
+
+            /* 4 Stat Cards matching the 4 pastel pills in image */
+            .stat-card.blue {
+                background: linear-gradient(180deg, #FFFFFF 0%, #F5F9F6 100%) !important;
+                border-top: 4px solid #82C29B !important;
+                border-left: none !important;
+            }
+            .stat-card.blue .stat-icon {
+                background: #E2F2E7 !important;
+                color: #4FA873 !important;
+                border-radius: 14px !important;
+            }
+            .stat-card.green {
+                background: linear-gradient(180deg, #FFFFFF 0%, #FDF7F5 100%) !important;
+                border-top: 4px solid #F09A85 !important;
+                border-left: none !important;
+            }
+            .stat-card.green .stat-icon {
+                background: #FCE8E3 !important;
+                color: #E8846A !important;
+                border-radius: 14px !important;
+            }
+            .stat-card.orange {
+                background: linear-gradient(180deg, #FFFFFF 0%, #FEFBF4 100%) !important;
+                border-top: 4px solid #F6C878 !important;
+                border-left: none !important;
+            }
+            .stat-card.orange .stat-icon {
+                background: #FDF3DB !important;
+                color: #DE9B28 !important;
+                border-radius: 14px !important;
+            }
+            .stat-card.red {
+                background: linear-gradient(180deg, #FFFFFF 0%, #F4F8FB 100%) !important;
+                border-top: 4px solid #99BBD3 !important;
+                border-left: none !important;
+            }
+            .stat-card.red .stat-icon {
+                background: #E2EDF5 !important;
+                color: #5587A8 !important;
+                border-radius: 14px !important;
+            }
+
+            .stat-info h3 { color: #7A726C !important; font-weight: 500 !important; font-size: 13px !important; }
+            .stat-info .number { color: #2F2A26 !important; font-weight: 700 !important; font-size: 32px !important; }
+            .stat-info .sub { color: #9C938C !important; font-size: 12px !important; }
+
+            /* Filter Bar */
+            .filter-bar {
+                background: #FFFFFF !important;
+                border-radius: 18px !important;
+                padding: 16px 20px !important;
+                border: 1px solid rgba(235, 225, 215, 0.8) !important;
+                box-shadow: 0 2px 12px rgba(190, 170, 155, 0.08) !important;
+            }
+            .filter-group input, .filter-group select, .form-group input, .form-group select, .form-group textarea {
+                background: #FAFAF7 !important;
+                border: 1.5px solid #EAE3DC !important;
+                border-radius: 12px !important;
+                color: #403A35 !important;
+            }
+
+            /* Buttons */
+            .btn-reset, #rptResetBtn {
+                background: #EDE5DE !important;
+                color: #695F56 !important;
+                border: none !important;
+                border-radius: 12px !important;
+                font-weight: 600 !important;
+            }
+            .btn-reset:hover, #rptResetBtn:hover {
+                background: #E0D6CE !important;
+                color: #4F463E !important;
+            }
+
+            /* Data Tables */
+            .data-table th, table.dataTable thead th {
+                background: #F7EFE9 !important;
+                color: #594F47 !important;
+                font-weight: 700 !important;
+                border-bottom: 2px solid #E8DCCF !important;
+            }
+            .data-table td, table.dataTable tbody td {
+                border-bottom: 1px solid #F2EBE4 !important;
+                color: #433D39 !important;
+            }
+            .data-table tr:hover td, table.dataTable tbody tr:hover td {
+                background: #FAF4EF !important;
+            }
+
+            /* Modals */
+            .modal-content, .modern-modal .modal-content {
+                background: #FFFFFF !important;
+                border-radius: 24px !important;
+                border: 1px solid #EAE3DC !important;
+                box-shadow: 0 16px 40px rgba(180, 160, 145, 0.25) !important;
+            }
+            .modal-header, .modern-modal .modal-header {
+                background: #FBF6F0 !important;
+                border-bottom: 1px solid #EAE3DC !important;
+                border-radius: 24px 24px 0 0 !important;
+            }
+            .modal-header h3, .modern-modal .modal-header h3 {
+                color: #38322E !important;
+            }
+
+            /* User Avatar */
+            .user-avatar {
+                background: linear-gradient(135deg, #E8846A 0%, #F49E87 100%) !important;
+                color: #FFFFFF !important;
+                box-shadow: 0 2px 8px rgba(232, 132, 106, 0.3) !important;
+            }
         `;
+
         
         
         // ปิด Modal (ถ้าเปิดอยู่)
