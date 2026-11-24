@@ -11854,29 +11854,26 @@ function collapseAllVillages() {
     }
 
     function formatDate(val) {
-    if (!val) return '-';
-    let d = new Date(val);
-    if (isNaN(d.getTime())) {
-        let parts = String(val).split(/[-/T ]/);
-        if (parts.length >= 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
-            let y = parseInt(parts[0]);
-            let m = parseInt(parts[1]) - 1;
-            let day = parseInt(parts[2]);
-            if (y > 1000) d = new Date(y, m, day);
-        }
-    }
-    if (isNaN(d.getTime())) return String(val);
-    return formatThaiDateShort(d);
-} else if (typeof parseBirthDateSafe === 'function') {
+        if (!val || val === '-' || val === '0') return '-';
+        let d = null;
+        if (val instanceof Date) {
+            d = val;
+        } else if (typeof parseBirthDateSafe === 'function') {
             d = parseBirthDateSafe(val);
         } else {
             d = new Date(val);
         }
-        if (d && !isNaN(d.getTime())) {
-            // กำหนดให้ day เป็น '2-digit' เพื่อบังคับเติม 0
-            return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: '2-digit' });
+        if (!d || isNaN(d.getTime())) {
+            let parts = String(val).split(/[-/T ]/);
+            if (parts.length >= 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+                let y = parseInt(parts[0]);
+                let m = parseInt(parts[1]) - 1;
+                let day = parseInt(parts[2]);
+                if (y > 1000) d = new Date(y, m, day);
+            }
         }
-        return val.toString();
+        if (!d || isNaN(d.getTime())) return String(val);
+        return formatThaiDateShort(d);
     }
 
     function formatThaiDateShort(dateVal) {
