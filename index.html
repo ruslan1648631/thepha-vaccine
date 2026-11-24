@@ -5116,6 +5116,8 @@
                 <div id="vaccineStockPage" class="page"></div>
                 <div id="vhvFastTrackPage" class="page"></div>
                 <div id="jhcisFeedbackPage" class="page"></div>
+                <div id="foundChildReportPage" class="page"></div>
+                <div id="ossPage" class="page"></div>
             </div>
         </div>
     </div>
@@ -5177,6 +5179,7 @@
         '09499': 'รพ.สต.สะกอม',
         '09500': 'รพ.สต.ท่าแมงลัก',
         '11915': 'รพ.สต.ทุ่งโดน',
+        '11390': 'รพ.เทพา',
         '15107': 'PCU2',
         '15109': 'PCU1'
     };
@@ -6545,7 +6548,7 @@
             const canSeeAll = isAdminAmpur || isSpecialOfficer;
 
             const filterBuilder = (q) => {
-                q = q.in('type', [1, 3]); // ✅ ดึงเฉพาะเด็กในเขต type = 1, 3
+                if (!filters.search) { q = q.in('type', [1, 3]); }
                 if (!canSeeAll && userHc) {
                     const unp = userHcNorm;
                     const pad = userHc.padStart(5, '0');
@@ -6598,7 +6601,8 @@
 
             // Deduplicate & Merge Children (in-area)
             const childMap = new Map();
-            (data || []).filter(isInAreaChild).forEach(row => {
+            const rowsToProcess = filters.search ? (data || []) : (data || []).filter(isInAreaChild);
+            rowsToProcess.forEach(row => {
                 const rawCid = String(row.CID || row.cid || row.ID || row.id || row['\u0E40\u0E25\u0E02\u0E1A\u0E31\u0E15\u0E23'] || '').replace(/\D/g, '').trim();
                 const rawHn = String(row.HN || row.hn || row['\u0E23\u0E2B\u0E31\u0E2A'] || '').trim();
                 const rawHcode = (row.hcode !== undefined && row.hcode !== null) ? String(row.hcode).trim() : '';
@@ -9641,10 +9645,13 @@
                     const cleanName = childId.replace(/[\'\"\%\_]/g, '').trim();
                     if (cleanName) {
                         // ใช้ fetchAllFromTable กรองฝั่ง JS เพื่อหลีกเลี่ยง ilike บน bigint column
-                        const allByName = await fetchAllFromTable('data', 'CID, HN, fullname, DOB, moo, villname, hcode, hname, house, type, subdistname');
+                        const allByName = await fetchAllFromTable('data', '*');
                         const matchedByName = allByName.filter(r => {
                             const rn = String(r.fullname || r['ชื่อ-สกุล'] || r.childname || '').toLowerCase();
-                            return rn.includes(cleanName.toLowerCase());
+                            const stripP = (s) => String(s || '').replace(/^(เด็กชาย|เด็กหญิง|ด\.ช\.|ด\.ญ\.|ด\.ช|ด\.ญ|นาย|นางสาว|น\.ส\.)\s*/i, '').replace(/\s+/g, '').toLowerCase();
+                            const tNorm = stripP(cleanName);
+                            const rNorm = stripP(rn);
+                            return rn.includes(cleanName.toLowerCase()) || (tNorm.length >= 2 && (rNorm.includes(tNorm) || tNorm.includes(rNorm)));
                         });
                         if (matchedByName.length > 0) data = matchedByName;
                     }
@@ -11499,6 +11506,7 @@ function renderPublicFacilitiesTable(facilities) {
         '09499': 'รพ.สต.สะกอม',
         '09500': 'รพ.สต.ท่าแมงลัก',
         '11915': 'รพ.สต.ทุ่งโดน',
+        '11390': 'รพ.เทพา',
         '15107': 'PCU2',
         '15109': 'PCU1'
     };
@@ -12745,6 +12753,7 @@ async function warmUpBackend() {
                 { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' },
                 { id: 'officerTracking', icon: 'fas fa-clipboard-list', label: 'ติดตามวัคซีน' },
                 { id: 'foundChildReport', icon: 'fas fa-search-plus', label: 'ค้นหา/เพิ่มเด็กที่พบ', badge: 'พบในพื้นที่' },
+                { id: 'oss', icon: 'fas fa-concierge-bell', label: 'OSS บริการครบวงจร' },
                 { id: 'report', icon: 'fas fa-file-medical-alt', label: 'รายงานการติดตาม' },
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
                 { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
@@ -12766,6 +12775,7 @@ async function warmUpBackend() {
                 { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' },
                 { id: 'officerTracking', icon: 'fas fa-clipboard-list', label: 'ติดตามวัคซีน' },
                 { id: 'foundChildReport', icon: 'fas fa-search-plus', label: 'ค้นหา/เพิ่มเด็กที่พบ', badge: 'พบในพื้นที่' },
+                { id: 'oss', icon: 'fas fa-concierge-bell', label: 'OSS บริการครบวงจร' },
                 { id: 'report', icon: 'fas fa-file-medical-alt', label: 'รายงานการติดตาม' },
                 { id: 'coverage', icon: 'fas fa-shield-virus', label: 'ความครอบคลุมวัคซีน' },
                 { id: 'duplicateReport', icon: 'fas fa-clone', label: 'เด็กซ้ำหลายสถานพยาบาล' },
@@ -12782,6 +12792,7 @@ async function warmUpBackend() {
                 { id: 'vaccineStock', icon: 'fas fa-boxes', label: 'คลังวัคชีน' },
                 { id: 'districtChildSearch', icon: 'fas fa-search-location', label: 'ค้นหาเด็กในอำเภอ', badge: 'ค้นข้ามเขต' },
                 { id: 'foundChildReport', icon: 'fas fa-search-plus', label: 'ค้นหา/เพิ่มเด็กที่พบ', badge: 'พบในพื้นที่' },
+                { id: 'oss', icon: 'fas fa-concierge-bell', label: 'OSS บริการครบวงจร' },
                 { id: 'trackingForm', icon: 'fas fa-plus-circle', label: 'รายงานการติดตาม' },
                 { id: 'calendar', icon: 'fas fa-calendar-check', label: 'ปฏิทินนัดวัคซีน' },
                 { id: 'vhvFastTrack', icon: 'fas fa-mobile-alt', label: 'บันทึกผลติดตาม (Fast)', badge: 'มือถือ' }
@@ -12790,7 +12801,7 @@ async function warmUpBackend() {
 
         document.getElementById('sidebarMenu').innerHTML = items.map(function(item) {
             if (item.sep) return '<div class="menu-section">' + item.sep + '</div>';
-            var badgeColor = item.badge === 'ค้นข้ามเขต' ? '#0284c7' : item.badge === 'มือถือ' ? '#16a34a' : item.badge === 'พบในพื้นที่' ? '#0284c7' : '#dc2626';
+            var badgeColor = item.badge === 'ค้นข้ามเขต' ? '#0284c7' : item.badge === 'มือถือ' ? '#16a34a' : item.badge === 'พบในพื้นที่' ? '#0284c7' : item.badge === 'ครบจุด' ? '#8b5cf6' : '#dc2626';
             var badgeHtml = item.badge ? '<span class="badge" style="margin-left:auto;background:' + badgeColor + ';color:#fff;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.3px;box-shadow:0 1px 3px rgba(2,132,199,0.3);">' + item.badge + '</span>' : '';
             return '<div class="menu-item ' + (APP.currentPage === item.id ? 'active' : '') + '" data-page="' +
                 item.id + '"><i class="' + item.icon + '"></i><span>' + item.label + '</span>' + badgeHtml + '</div>';
@@ -12939,6 +12950,7 @@ const PAGE_TITLES = {
     trackingForm: 'รายงานการติดตาม',
     officerTracking: 'ติดตามวัคซีนเด็ก',
     foundChildReport: 'รายงานค้นหาและเพิ่มรายชื่อเด็กที่พบ (ติดตามเด็กนอกเขต/ในพื้นที่)',
+    oss: 'OSS บริการครบวงจร (ค้นหาและจัดการเด็กทุกอย่างจากจุดเดียว)',
     report: 'รายงานสรุปการติดตามวัคซีน',
     coverage: 'ความครอบคลุมวัคซีน',
     duplicateReport: 'ตรวจสอบเด็กคนเดียว อยู่หลายสถานพยาบาล (เลขบัตรประชาชนซ้ำ)',
@@ -12984,6 +12996,7 @@ function navigateTo(page) {
         case 'trackingForm': loadTrackingFormPage(); break;
         case 'officerTracking': loadOfficerTrackingPage(); break;
         case 'foundChildReport': loadFoundChildReportPage(); break;
+        case 'oss': loadOssPage(); break;
         case 'report': loadReportPage(); break;
         case 'coverage': 
             document.getElementById('coveragePage').classList.add('active');
@@ -13855,9 +13868,11 @@ function updateBottomNavActive(page) {
             '</div>';
     }
 
-    window.viewChildFromMap = async function(childId) {
-        if (!childId || childId === '-' || childId === '0') {
-            return Swal.fire('ผิดพลาด', 'ไม่พบรหัสเด็กสำหรับการแสดงผล', 'error');
+    window.viewChildFromMap = async function(childId, optName) {
+        if (!childId || childId === '-' || childId === '0' || childId === 'undefined') { childId = optName || ''; }
+        if (!childId || childId === '-' || childId === '0' || childId === 'undefined') { return Swal.fire('ผิดพลาด', 'ไม่พบรหัสเด็กหรือชื่อเด็กสำหรับการแสดงผล', 'error'); }
+
+
         }
 
         const cached = window.CHILD_DETAIL_MAP && (window.CHILD_DETAIL_MAP[String(childId).trim()]);
@@ -14530,6 +14545,7 @@ function updateBottomNavActive(page) {
             '<option value="09496">รพ.สต.ท่าม่วง (09496)</option><option value="09497">รพ.สต.พรุชิง (09497)</option>' +
             '<option value="09498">รพ.สต.วังใหญ่ (09498)</option><option value="09499">รพ.สต.สะกอม (09499)</option>' +
             '<option value="09500">รพ.สต.ท่าแมงลัก (09500)</option><option value="11915">รพ.สต.ทุ่งโดน (11915)</option>' +
+            '<option value="11390">รพ.เทพา (11390)</option>' +
             '<option value="15107">PCU2 (15107)</option><option value="15109">PCU1 (15109)</option>' +
             '</select></div>' +
             '<div class="form-group"><label>ตำแหน่ง</label><select id="um_role"><option value="เจ้าหน้าที่">เจ้าหน้าที่</option><option value="อสม.">อสม.</option><option value="Admin_HOS">Admin ระดับสถานพยาบาล</option><option value="Admin_Ampur">Admin ระดับอำเภอ</option></select></div>' +
@@ -14568,7 +14584,15 @@ function updateBottomNavActive(page) {
             }
             
             // กรองหาหมู่บ้านและตำบลที่ตรงกับ hcode
-            const filtered = APP.allVillagesCache.filter(v => v.hcode === hcode);
+            const normHc = String(hcode).replace(/^0+/, '');
+            let filtered = APP.allVillagesCache.filter(v => String(v.hcode || '').replace(/^0+/, '') === normHc);
+            if (typeof getOfficerVillagesForFacility === 'function' && filtered.length < 3) {
+                const fb = await getOfficerVillagesForFacility(hcode);
+                if (fb && fb.length > 0) {
+                    const existing = new Set(filtered.map(x => String(x.village_no || x.no)));
+                    fb.forEach(f => { if (!existing.has(String(f.no))) filtered.push({ village_no: f.no, no: f.no, village_name: f.rawName || f.name, name: f.name, subdistrict: f.subdistrict || '-', hcode: hcode }); });
+                }
+            }
             APP.currentHcodeVillages = filtered;
             
             const subs = [...new Set(filtered.map(v => v.subdistrict).filter(Boolean))];
@@ -14677,6 +14701,18 @@ function updateBottomNavActive(page) {
         const orig = document.getElementById('userModalOriginal').value;
         const pwdInput = document.getElementById('um_password').value.trim();
 
+        // Validate username: English/digits only
+        const _usernameVal = document.getElementById('um_username').value.trim();
+        if (_usernameVal && !/^[a-zA-Z0-9_]+$/.test(_usernameVal)) {
+            return Swal.fire('แจ้งเตือน', 'ชื่อผู้ใช้ต้องเป็นภาษาอังกฤษ ตัวเลข หรือ _ เท่านั้น', 'warning');
+        }
+        // Validate อสม. must have village
+        const _roleVal = document.getElementById('um_role').value;
+        const _villageVal = (document.getElementById('um_village') || {}).value || '';
+        const _subVal = (document.getElementById('um_subdistrict') || {}).value || '';
+        if (_roleVal === 'อสม.' && (!_subVal.trim() || !_villageVal.trim())) {
+            return Swal.fire('แจ้งเตือน', 'ผู้ใช้บทบาท อสม. ต้องเลือกตำบลและหมู่บ้านที่รับผิดชอบ', 'warning');
+        }
         if (mode === 'add' && (!pwdInput || pwdInput.length < 6)) {
             return Swal.fire('แจ้งเตือน', 'กรุณาระบุรหัสผ่านอย่างน้อย 6 ตัวอักษร', 'warning');
         }
@@ -15234,7 +15270,7 @@ function updateBottomNavActive(page) {
             let childrenList = (result.success && result.children) ? result.children : [];
 
             // ✅ Client-side Guard: กรองสถานพยาบาลของตัวเองอย่างเด็ดขาดสำหรับเจ้าหน้าที่
-            if (!canSelectAll && APP.currentUser && APP.currentUser.hcode) {
+            if (!canSelectAll && APP.currentUser && APP.currentUser.hcode && !searchValue) {
                 const myHcNorm = String(APP.currentUser.hcode).replace(/^0+/, '');
                 childrenList = childrenList.filter(function(c) {
                     const cHcNorm = String(c.hcode || '').replace(/^0+/, '');
@@ -20605,6 +20641,7 @@ function updateBottomNavActive(page) {
             '<th>หมายเหตุ / ข้อมูลที่อยู่ใหม่</th>' +
             '<th>' + esc(APP.rptHeaders[4] || 'GPS') + '</th>' +
             '<th>' + esc(APP.rptHeaders[7] || 'Files') + '</th>' +
+            '<th>จัดการ</th>' +
             '</tr></thead>' +
             '<tbody>' +
             (records.length > 0 ?
@@ -20631,6 +20668,7 @@ function updateBottomNavActive(page) {
                             '" target="_blank"><i class="fas fa-map-marker-alt"></i> ดูแผนที่</a>' :
                             '<span style="color:#ccc;font-size:12px">-</span>') + '</td>' +
                         '<td style="font-size:12px;color:#888">' + esc(r.files || '-') + '</td>' +
+                        '<td style="white-space:nowrap;"><button class="action-btn edit" title="แก้ไขการติดตาม" onclick="window.onEditTrackingClick(' + idx + ')" style="font-size:11px;"><i class="fas fa-edit"></i> แก้ไข</button></td>' +
                         '</tr>';
                 }).join('') :
                 '') +
@@ -20649,7 +20687,7 @@ function updateBottomNavActive(page) {
                 ],
                 scrollX: true,
                 autoWidth: false,
-                columnDefs: [{ orderable: false, targets: [8, 9] }]
+                columnDefs: [{ orderable: false, targets: [8, 9, 10] }]
             });
             setTimeout(function() {
                 if ($.fn.DataTable.isDataTable('#rptTable')) {
@@ -22365,6 +22403,8 @@ window.confirmClearOldAppointments = async function() {
         const c2 = localStorage.getItem('vcc_theme_c2');
         if (c1 && c2) {
             applyTheme(c1, c2);
+        } else {
+            applyTheme('#E8846A', '#F4A490');
         }
     }
 
@@ -22375,6 +22415,7 @@ window.confirmClearOldAppointments = async function() {
             title: 'เลือกสีธีมที่ต้องการ',
             html: `
                 <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 15px;">
+<button onclick="applyTheme('#E8846A', '#F4A490')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #E8846A; background: linear-gradient(135deg, #E8846A, #F4A490); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Salmon (ค่าเริ่มต้น)"></button>
                     <button onclick="applyTheme('#0284c7', '#555555')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #fff; background: linear-gradient(135deg, #0284c7, #06b6d4); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"></button>
                     <button onclick="applyTheme('#28c76f', '#16a34a')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #fff; background: linear-gradient(135deg, #28c76f, #16a34a); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"></button>
                     <button onclick="applyTheme('#00cfe8', '#0284c7')" style="width: 45px; height: 45px; border-radius: 50%; border: 3px solid #fff; background: linear-gradient(135deg, #00cfe8, #0284c7); cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.15); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"></button>
@@ -22474,6 +22515,195 @@ window.confirmClearOldAppointments = async function() {
         // ปิด Modal (ถ้าเปิดอยู่)
         if (Swal.isVisible()) Swal.close();
     };
+
+
+    // ============================================================
+    // OSS - ONE STOP SERVICE PAGE
+    // ============================================================
+    window.loadOssPage = async function() {
+        const page = document.getElementById('ossPage');
+        if (!page) return;
+        page.innerHTML = '';
+        page.classList.add('active');
+
+        page.innerHTML = `
+        <div class="page-title"><i class="fas fa-concierge-bell"></i> OSS — บริการค้นหาและจัดการเด็กทุกอย่างจากจุดเดียว</div>
+        <div style="background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.07);padding:24px;margin-bottom:20px;">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+            <input type="text" id="ossSearchInput" placeholder="พิมพ์ชื่อ-สกุล, เลขบัตร 13 หลัก, หรือ HN..." style="flex:1;min-width:220px;padding:10px 16px;border:1px solid #d1d5db;border-radius:10px;font-size:15px;">
+            <button onclick="doOssSearch()" class="btn-search-child" style="padding:10px 24px;font-size:15px;"><i class="fas fa-search"></i> ค้นหา</button>
+            <button onclick="document.getElementById('ossSearchInput').value='';document.getElementById('ossResultArea').innerHTML='<div style=text-align:center;color:#aaa;padding:40px>พิมพ์ชื่อเพื่อค้นหา</div>';" style="padding:10px 18px;background:#f1f5f9;border:none;border-radius:10px;cursor:pointer;"><i class="fas fa-times"></i> ล้าง</button>
+          </div>
+          <div style="margin-top:10px;font-size:12.5px;color:#64748b;">
+            <i class="fas fa-lightbulb" style="color:#f59e0b;"></i> ค้นหาครอบคลุมทุกสถานพยาบาล และทุก Type (1, 2, 3, 4)
+          </div>
+        </div>
+        <div id="ossResultArea" style="min-height:200px;">
+          <div style="text-align:center;color:#aaa;padding:40px;">พิมพ์ชื่อเพื่อค้นหา</div>
+        </div>`;
+
+        setTimeout(function() {
+            const inp = document.getElementById('ossSearchInput');
+            if (inp) inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') doOssSearch(); });
+        }, 100);
+    };
+
+    window.doOssSearch = async function() {
+        const kw = (document.getElementById('ossSearchInput') || {}).value || '';
+        if (!kw.trim() || kw.trim().length < 2) {
+            return Swal.fire('แจ้งเตือน', 'กรุณาพิมพ์อย่างน้อย 2 ตัวอักษร', 'warning');
+        }
+        const area = document.getElementById('ossResultArea');
+        area.innerHTML = '<div style="text-align:center;padding:30px;color:#64748b;"><i class="fas fa-spinner fa-spin fa-2x"></i><div style="margin-top:10px;">กำลังค้นหา...</div></div>';
+
+        try {
+            const isAmpur = isAdminAmpurUser() || isSpecialOfficerUser();
+            const userHcode = APP.currentUser ? APP.currentUser.hcode : '';
+
+            let query = supabaseClient.from('data').select('hcode,CID,HN,fullname,DOB,type,moo,villname,subdistname,house,phone');
+            if (!isAmpur && userHcode) query = query.eq('hcode', userHcode);
+
+            const { data: allData, error } = await query.limit(2000);
+            if (error) throw error;
+
+            const kwLower = kw.trim().toLowerCase();
+            const matched = (allData || []).filter(function(row) {
+                const name = String(row.fullname || '').toLowerCase();
+                const cid = String(row.CID || '').toLowerCase();
+                const hn = String(row.HN || '').toLowerCase();
+                return name.includes(kwLower) || cid.includes(kwLower) || hn.includes(kwLower);
+            });
+
+            if (matched.length === 0) {
+                area.innerHTML = '<div style="text-align:center;color:#ef4444;padding:40px;"><i class="fas fa-search fa-2x" style="margin-bottom:12px;display:block;"></i>ไม่พบข้อมูลเด็กที่ตรงกับ &ldquo;' + esc(kw) + '&rdquo;</div>';
+                return;
+            }
+
+            area.innerHTML = '<div style="margin-bottom:12px;color:#64748b;font-size:13px;"><i class="fas fa-check-circle" style="color:#10b981;"></i> พบ <strong>' + matched.length + '</strong> รายการ</div>' +
+                '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">' +
+                matched.map(function(row) {
+                    const age = ossCalcAge(row.DOB);
+                    const hosName = esc(getFacilityDisplayName(row.hcode));
+                    const pid = esc(String(row.CID || row.HN || '-'));
+                    const firstName = esc((row.fullname || 'U')[0]);
+                    const fullname = esc(row.fullname || '-');
+                    const villname = esc(row.villname || '-');
+                    const moo = row.moo || '-';
+                    const typeNum = row.type || '-';
+                    const cidStr = String(row.CID || row.HN || '');
+                    const hcodeStr = String(row.hcode || '');
+                    return '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.05);">' +
+                        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">' +
+                        '<div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#E8846A,#F4A490);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;">' + firstName + '</div>' +
+                        '<div><div style="font-weight:600;color:#0f172a;">' + fullname + '</div>' +
+                        '<div style="font-size:12px;color:#64748b;">' + hosName + ' | หมู่ ' + moo + '</div></div></div>' +
+                        '<div style="font-size:12.5px;color:#475569;display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:14px;">' +
+                        '<div><i class="fas fa-id-card" style="width:14px;color:#94a3b8;"></i> ' + pid + '</div>' +
+                        '<div><i class="fas fa-birthday-cake" style="width:14px;color:#94a3b8;"></i> ' + age + '</div>' +
+                        '<div><i class="fas fa-home" style="width:14px;color:#94a3b8;"></i> ' + villname + '</div>' +
+                        '<div><i class="fas fa-tag" style="width:14px;color:#94a3b8;"></i> Type ' + typeNum + '</div>' +
+                        '</div>' +
+                        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                        '<button onclick="getChildDetail(\'' + cidStr.replace(/'/g, "\\'") + '\',\'' + (row.fullname||'').replace(/'/g, "\\'") + '\')" style="flex:1;padding:7px 10px;background:#0284c7;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;min-width:80px;"><i class="fas fa-history"></i> ประวัติวัคซีน</button>' +
+                        '<button onclick="ossGoTrack(\'' + cidStr.replace(/'/g, "\\'") + '\',\'' + (row.fullname||'').replace(/'/g, "\\'") + '\',\'' + hcodeStr + '\',\'' + moo + '\')" style="flex:1;padding:7px 10px;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;min-width:80px;"><i class="fas fa-clipboard-check"></i> บันทึกติดตาม</button>' +
+                        '</div>' +
+                        '</div>';
+                }).join('') +
+                '</div>';
+        } catch(e) {
+            area.innerHTML = '<div style="color:#ef4444;padding:20px;">เกิดข้อผิดพลาด: ' + esc(e.message) + '</div>';
+        }
+    };
+
+    window.ossGoTrack = function(childId, childName, hcode, moo) {
+        navigateTo('trackingForm');
+        setTimeout(function() {
+            const inp = document.querySelector('#trackingSearchInput') || document.querySelector('.search-input');
+            if (inp) { inp.value = childName; inp.dispatchEvent(new Event('input')); }
+        }, 800);
+    };
+
+    function ossCalcAge(dob) {
+        try {
+            if (!dob) return '-';
+            let d = new Date(dob);
+            if (isNaN(d.getTime())) return '-';
+            const now = new Date();
+            let y = now.getFullYear() - d.getFullYear();
+            let m = now.getMonth() - d.getMonth();
+            if (m < 0) { y--; m += 12; }
+            if (y === 0) return m + ' เดือน';
+            return y + ' ปี ' + m + ' เดือน';
+        } catch(e) { return '-'; }
+    }
+
+    // ============================================================
+    // EDIT TRACKING RECORD MODAL
+    // ============================================================
+    window.onEditTrackingClick = function(idx) { const r = (APP.rptAllRecords || [])[idx]; if (!r) return Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลรายการ', 'error'); openEditTrackingModal(r); };
+    window.openEditTrackingModal = function(r) {
+        if (typeof r === 'string') {
+            try { r = JSON.parse(r); } catch(e) { return Swal.fire('ผิดพลาด', 'ไม่สามารถอ่านข้อมูลได้', 'error'); }
+        }
+
+        const statusOptions = ['ตามนัดปกติ','ยินยอมฉีดวัคซีนตามนัด','นัดมา รพ.สต.','ฉีดแล้วที่อื่น','ขาดนัด','ปฏิเสธวัคซีน','ย้ายที่อยู่','อื่นๆ'];
+        const opts = statusOptions.map(function(s) {
+            return '<option value="' + s + '"' + (r.status === s ? ' selected' : '') + '>' + s + '</option>';
+        }).join('');
+
+        Swal.fire({
+            title: '<i class="fas fa-edit" style="color:#0284c7;"></i> แก้ไขการติดตาม',
+            html: '<div style="text-align:left;">' +
+                '<div style="background:#f8fafc;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px;">' +
+                '<b>' + esc(r.childName || r.ChildName || '-') + '</b><br>' +
+                '<span style="color:#64748b;">หมู่: ' + esc(r.village || '-') + ' | วัคซีน: ' + esc(r.vaccine || '-') + '</span>' +
+                '</div>' +
+                '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px;">สถานะการติดตาม</label>' +
+                '<select id="editTrackStatus" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:8px;margin-bottom:12px;">' + opts + '</select>' +
+                '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px;">หมายเหตุ / ข้อมูลเพิ่มเติม</label>' +
+                '<textarea id="editTrackRemarks" rows="3" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:8px;resize:vertical;">' + esc(r.remarks || r.Remarks || '') + '</textarea>' +
+                '</div>',
+            showCancelButton: true,
+            confirmButtonText: '<i class="fas fa-save"></i> บันทึก',
+            cancelButtonText: 'ยกเลิก',
+            confirmButtonColor: '#0284c7',
+            preConfirm: function() {
+                return {
+                    status: document.getElementById('editTrackStatus').value,
+                    remarks: document.getElementById('editTrackRemarks').value.trim()
+                };
+            }
+        }).then(async function(result) {
+            if (!result.isConfirmed) return;
+            const newData = result.value;
+            showLoading('กำลังบันทึก...');
+            try {
+                const childId = r.childId || r.ChildId || r.childID || '';
+                const timestamp = r.timestamp || r.Timestamp || '';
+                let updateRes;
+                if (childId && timestamp) {
+                    updateRes = await supabaseClient.from('VCC_tracking')
+                        .update({ Status: newData.status, Remarks: newData.remarks })
+                        .eq('ChildId', String(childId))
+                        .eq('Timestamp', String(timestamp));
+                } else if (childId) {
+                    updateRes = await supabaseClient.from('VCC_tracking')
+                        .update({ Status: newData.status, Remarks: newData.remarks })
+                        .eq('ChildId', String(childId));
+                } else {
+                    throw new Error('ไม่สามารถระบุรายการที่จะแก้ไขได้');
+                }
+                hideLoading();
+                if (updateRes && updateRes.error) throw updateRes.error;
+                Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', text: 'แก้ไขสถานะการติดตามเรียบร้อย', timer: 1500, showConfirmButton: false });
+                setTimeout(doLoadReport, 500);
+            } catch(e) {
+                hideLoading();
+                Swal.fire('ผิดพลาด', e.message || String(e), 'error');
+            }
+        });
+    };
+
 
     // สั่งให้รันฟังก์ชันโหลดสีทันที
     loadSavedTheme();
