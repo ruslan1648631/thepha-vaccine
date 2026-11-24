@@ -6371,7 +6371,7 @@
         // 13. ประวัติกิจกรรม (Activity Logs)
         if (fnName === 'getActivityLogs') {
             const filters = args[0] || {};
-            let query = supabaseClient.from('Activity_Log').select('*').limit(500);
+            let query = supabaseClient.from('Activity_log').select('*').limit(500);
             if (filters.userRole === 'Admin_HOS' && filters.userHcode) {
                 const unp = String(filters.userHcode).replace(/^0+/, '');
                 const pad = String(filters.userHcode).padStart(5, '0');
@@ -6422,7 +6422,7 @@
         if (fnName === 'logActivity') {
             const l = args[0];
             if (l) {
-                await supabaseClient.from('Activity_Log').insert([{
+                await supabaseClient.from('Activity_log').insert([{
                     username: l.username,
                     fullname: l.fullname,
                     role: l.role,
@@ -8606,7 +8606,7 @@
             try {
                 const logHcode = userHcode || (records[0] ? records[0].hcode : '-') || '-';
                 const hcodeNum = Number(String(logHcode).replace(/\D/g, '')) || 0;
-                await supabaseClient.from('Activity_Log').insert([{
+                await supabaseClient.from('Activity_log').insert([{
                     Username: APP.currentUser ? APP.currentUser.username : 'admin',
                     Fullname: APP.currentUser ? APP.currentUser.fullname : 'ผู้ดูแลระบบ',
                     Role: userRole || (APP.currentUser ? APP.currentUser.role : 'เจ้าหน้าที่'),
@@ -8797,7 +8797,7 @@
             try {
                 const logHcode = userHcode || (records[0] ? records[0].hcode : '-') || '-';
                 const hcodeNum = Number(String(logHcode).replace(/\D/g, '')) || 0;
-                await supabaseClient.from('Activity_Log').insert([{
+                await supabaseClient.from('Activity_log').insert([{
                     Username: APP.currentUser ? APP.currentUser.username : 'admin',
                     Fullname: APP.currentUser ? APP.currentUser.fullname : 'ผู้ดูแลระบบ',
                     Role: userRole || (APP.currentUser ? APP.currentUser.role : 'เจ้าหน้าที่'),
@@ -10796,12 +10796,12 @@
                 console.warn('Error counting appoint rows:', e);
             }
 
-            // 1.4 ดึงประวัติการนำเข้าจาก Activity_Log
+            // 1.4 ดึงประวัติการนำเข้าจาก Activity_log
             const importLogs = [];
             try {
                 let logsData = null;
                 try {
-                    const res = await supabaseClient.from('Activity_Log').select('*').limit(600);
+                    const res = await supabaseClient.from('Activity_log').select('*').limit(600);
                     if (res && res.data) logsData = res.data;
                 } catch(e) {}
 
@@ -10865,7 +10865,7 @@
                     });
                 }
             } catch (e) {
-                console.warn('Error fetching Activity_Log:', e);
+                console.warn('Error fetching Activity_log:', e);
             }
 
             // 2. กรองตามสิทธิ์ของผู้ใช้
@@ -11854,11 +11854,20 @@ function collapseAllVillages() {
     }
 
     function formatDate(val) {
-        if (!val || val === '-' || val === '0') return '-';
-        let d = null;
-        if (val instanceof Date) {
-            d = val;
-        } else if (typeof parseBirthDateSafe === 'function') {
+    if (!val) return '-';
+    let d = new Date(val);
+    if (isNaN(d.getTime())) {
+        let parts = String(val).split(/[-/T ]/);
+        if (parts.length >= 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+            let y = parseInt(parts[0]);
+            let m = parseInt(parts[1]) - 1;
+            let day = parseInt(parts[2]);
+            if (y > 1000) d = new Date(y, m, day);
+        }
+    }
+    if (isNaN(d.getTime())) return String(val);
+    return formatThaiDateShort(d);
+} else if (typeof parseBirthDateSafe === 'function') {
             d = parseBirthDateSafe(val);
         } else {
             d = new Date(val);
@@ -12289,11 +12298,11 @@ function logActivity(action, category, details) {
     console.log('📝 logActivity →', action, '|', details);
     
     
-    // ⚡ บันทึกตรงเข้า Supabase Activity_Log (Real-time)
+    // ⚡ บันทึกตรงเข้า Supabase Activity_log (Real-time)
     if (supabaseClient) {
         try {
             const hcodeNum = APP.currentUser.hcode ? (Number(String(APP.currentUser.hcode).replace(/\D/g, '')) || 0) : 0;
-            supabaseClient.from('Activity_Log').insert([{
+            supabaseClient.from('Activity_log').insert([{
                 Username: APP.currentUser.username,
                 Fullname: APP.currentUser.fullname,
                 Role: APP.currentUser.role,
@@ -12574,7 +12583,7 @@ async function warmUpBackend() {
         // ⚡ บันทึก Log ออกจากระบบตรงเข้า Supabase
         if (supabaseClient) {
             try {
-                supabaseClient.from('Activity_Log').insert([{
+                supabaseClient.from('Activity_log').insert([{
                     username: logData.username,
                     fullname: logData.fullname,
                     role: logData.role,
@@ -12743,7 +12752,6 @@ async function warmUpBackend() {
                 { id: 'dashboard', icon: 'fas fa-chart-line', label: 'Dashboard' },
                 { sep: 'จัดการระบบ' },
                 { id: 'users', icon: 'fas fa-users-cog', label: 'จัดการผู้ใช้งาน' },
-                { id: 'categories', icon: 'fas fa-map-marker-alt', label: 'จัดการหมู่บ้าน' },
                 { id: 'manageData', icon: 'fas fa-database', label: 'จัดการข้อมูล (นำเข้า/ลบ)' },
                 { id: 'accessLog', icon: 'fas fa-history', label: 'ประวัติการใช้งานระบบ' },
                 { sep: 'ข้อมูล' },
@@ -13138,7 +13146,7 @@ function updateBottomNavActive(page) {
 
         <div class="map-container">
             <h4><i class="fas fa-map-marked-alt"></i> แผนที่แสดงพิกัดบ้านเด็ก</h4>
-            <div id="childMap" style="height: 450px; border-radius: 8px; z-index: 10; display:flex; align-items:center; justify-content:center; background: #f1f5f9;">
+            <div id="childMap" style="width: 100%; aspect-ratio: 1 / 1; min-height: 400px; border-radius: 8px; z-index: 10; display:flex; align-items:center; justify-content:center; background: #f1f5f9;">
                 <div style="text-align:center; color:#94a3b8;">
                     <i class="fas fa-map fa-2x" style="margin-bottom:10px;"></i>
                     <div>กำลังโหลดแผนที่...</div>
@@ -13322,7 +13330,7 @@ function updateBottomNavActive(page) {
                         </select>
                     </div>
                 </div>
-                <div id="childMap" style="height: 450px; border-radius: 8px; z-index: 10;"></div>
+                <div id="childMap" style="width: 100%; aspect-ratio: 1 / 1; min-height: 400px; border-radius: 8px; z-index: 10;"></div>
             </div>
         `;
 
@@ -13497,7 +13505,7 @@ function updateBottomNavActive(page) {
                 },
                 scales: {
                     x: { max: 100, beginAtZero: true, ticks: { font: { family: 'Kanit' } } },
-                    y: { ticks: { font: { family: 'Kanit', size: 12 } } }
+                    y: { ticks: { autoSkip: false, font: { family: 'Kanit', size: 12 } } }
                 }
             }
         });
@@ -13548,16 +13556,52 @@ function updateBottomNavActive(page) {
 
         const total = data.total || ((data.onTime || 0) + (data.missed || 0) + (data.refused || 0));
 
+        const vOnTime = data.onTime || 0;
+        const vMissed = data.missed || 0;
+        const vRefused = data.refused || 0;
+        const pOnTime = total > 0 ? Math.round((vOnTime / total) * 100) : 0;
+        const pMissed = total > 0 ? Math.round((vMissed / total) * 100) : 0;
+        const pRefused = total > 0 ? Math.round((vRefused / total) * 100) : 0;
+
         APP.charts.status = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['มาตามนัดปกติ', 'ขาดนัด', 'ปฏิเสธวัคซีน'],
+                labels: [
+                    'มาตามนัด (' + pOnTime + '%)',
+                    'ขาดนัด (' + pMissed + '%)',
+                    'ปฏิเสธ (' + pRefused + '%)'
+                ],
                 datasets: [{
-                    data: [data.onTime || 0, data.missed || 0, data.refused || 0],
+                    data: [vOnTime, vMissed, vRefused],
                     backgroundColor: ['#28c76f', '#ff9f43', '#ea5455'],
                     borderWidth: 0
                 }]
             },
+            plugins: [{
+                id: 'doughnutPercentText',
+                afterDraw: function(chart) {
+                    const ctx2 = chart.ctx;
+                    chart.data.datasets.forEach(function(dataset, i) {
+                        const meta = chart.getDatasetMeta(i);
+                        meta.data.forEach(function(element, index) {
+                            const val = dataset.data[index];
+                            if (!val || total <= 0) return;
+                            const pct = Math.round((val / total) * 100);
+                            if (pct < 3) return;
+                            const position = element.tooltipPosition();
+                            ctx2.save();
+                            ctx2.fillStyle = '#ffffff';
+                            ctx2.font = 'bold 12px Kanit, sans-serif';
+                            ctx2.textAlign = 'center';
+                            ctx2.textBaseline = 'middle';
+                            ctx2.shadowColor = 'rgba(0, 0, 0, 0.4)';
+                            ctx2.shadowBlur = 4;
+                            ctx2.fillText(pct + '%', position.x, position.y);
+                            ctx2.restore();
+                        });
+                    });
+                }
+            }],
             options: {
                 responsive: true,
                 maintainAspectRatio: true,
@@ -13593,7 +13637,15 @@ function updateBottomNavActive(page) {
             const rate = d.rate || 0;
             
             // ✅ ตั้งค่าเงื่อนไขสี: 80% ขึ้นไปเป็นสีฟ้า (#0ea5e9) ต่ำกว่า 80% เป็นสีแดง (#ea5455)
-            const barColor = rate >= 80 ? '#0ea5e9' : '#ea5455'; 
+            let barColor = '#ef4444';
+            let textPercentColor = '#dc2626';
+            if (rate >= 90) {
+                barColor = '#16a34a';
+                textPercentColor = '#15803d';
+            } else if (rate >= 80) {
+                barColor = '#eab308';
+                textPercentColor = '#b45309';
+            } 
             
             const barHeight = Math.max(rate, 5);
             const total = d.total || 0;
@@ -13605,7 +13657,7 @@ function updateBottomNavActive(page) {
                 '<div class="bar-fill-vertical" style="height:' + barHeight + '%; background:' + barColor + '"></div>' +
                 '</div>' +
                 '<div class="bar-label" style="font-size:12px; font-weight:600; color:#1e293b; margin-top:8px; text-align:center; line-height:1.3; word-break:break-word; max-width:90px;" title="' + esc(villageName) + '">' + esc(villageName) + '</div>' +
-                '<div class="bar-value" style="margin-top:4px; font-size:11px; white-space:nowrap;">' + vaccinatedCount + '/' + total + ' <span class="bar-percent" style="font-weight:700; color:' + (rate >= 80 ? '#059669' : '#dc2626') + ';">(' + rate + '%)</span></div>' +
+                '<div class="bar-value" style="margin-top:4px; font-size:11px; white-space:nowrap;">' + vaccinatedCount + '/' + total + ' <span class="bar-percent" style="font-weight:700; color:' + textPercentColor + ';">(' + rate + '%)</span></div>' +
                 '</div>';
         }).join('');
     }
@@ -13906,6 +13958,7 @@ function updateBottomNavActive(page) {
         }
     };
     window.viewChild = window.viewChildFromMap;
+    window.getChildDetail = window.viewChildFromMap;
 
     /* ============================================================
      *  ระบบพิมพ์ประวัติการรับวัคซีนเด็ก (Certificate of Immunization)
@@ -20676,7 +20729,7 @@ function updateBottomNavActive(page) {
                             '" target="_blank"><i class="fas fa-map-marker-alt"></i> ดูแผนที่</a>' :
                             '<span style="color:#ccc;font-size:12px">-</span>') + '</td>' +
                         '<td style="font-size:12px;color:#888">' + esc(r.files || '-') + '</td>' +
-                        '<td style="white-space:nowrap;"><button class="action-btn edit" title="แก้ไขการติดตาม" onclick="window.onEditTrackingClick(' + idx + ')" style="font-size:11px;"><i class="fas fa-edit"></i> แก้ไข</button></td>' +
+                        '<td style="white-space:nowrap;"><button class="action-btn edit" title="แก้ไขการติดตาม" onclick="window.onEditTrackingClick(' + idx + ')" style="font-size:11px;"><i class="fas fa-edit"></i> แก้ไข</button>' + ((APP.currentUser && (APP.currentUser.role === 'admin' || APP.currentUser.role === 'staff_amp')) ? ' <button class="action-btn delete" title="ลบรายการติดตาม" onclick="window.onDeleteTrackingByIndex(' + idx + ')" style="font-size:11px;background:#fee2e2;color:#ef4444;border:1px solid #fca5a5;padding:3px 8px;border-radius:6px;cursor:pointer;"><i class="fas fa-trash-alt"></i> ลบ</button>' : '') + '</td>' +
                         '</tr>';
                 }).join('') :
                 '') +
@@ -22800,7 +22853,7 @@ window.confirmClearOldAppointments = async function() {
                         '<div><i class="fas fa-tag" style="width:14px;color:#94a3b8;"></i> Type ' + typeNum + '</div>' +
                         '</div>' +
                         '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-                        '<button onclick="getChildDetail(\'' + cidStr.replace(/'/g, "\\'") + '\',\'' + (row.fullname||'').replace(/'/g, "\\'") + '\')" style="flex:1;padding:7px 10px;background:#0284c7;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;min-width:80px;"><i class="fas fa-history"></i> ประวัติวัคซีน</button>' +
+                        '<button onclick="viewChildFromMap(\'' + cidStr.replace(/'/g, "\\'") + '\',\'' + (row.fullname||'').replace(/'/g, "\\'") + '\')" style="flex:1;padding:7px 10px;background:#0284c7;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;min-width:80px;"><i class="fas fa-history"></i> ประวัติวัคซีน</button>' +
                         '<button onclick="ossGoTrack(\'' + cidStr.replace(/'/g, "\\'") + '\',\'' + (row.fullname||'').replace(/'/g, "\\'") + '\',\'' + hcodeStr + '\',\'' + moo + '\')" style="flex:1;padding:7px 10px;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;min-width:80px;"><i class="fas fa-clipboard-check"></i> บันทึกติดตาม</button>' +
                         '</div>' +
                         '</div>';
@@ -22836,7 +22889,133 @@ window.confirmClearOldAppointments = async function() {
     // ============================================================
     // EDIT TRACKING RECORD MODAL
     // ============================================================
-    window.onEditTrackingClick = function(idx) { const r = (APP.rptAllRecords || [])[idx]; if (!r) return Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลรายการ', 'error'); openEditTrackingModal(r); };
+    window.onDeleteTrackingClick = async function(btn) {
+    try {
+        let itemStr = decodeURIComponent(btn.getAttribute('data-item') || '');
+        let item = JSON.parse(itemStr);
+        if (!item) return;
+
+        let res = await Swal.fire({
+            title: 'ยืนยันการลบรายการติดตาม?',
+            html: \<div style="text-align:left;font-size:0.95rem;color:#475569;line-height:1.6;">
+                    <p><strong>ชื่อเด็ก:</strong> \</p>
+                    <p><strong>ผู้บันทึก:</strong> \</p>
+                    <p><strong>วันที่:</strong> \</p>
+                    <p style="color:#ef4444;margin-top:8px;">คำเตือน: ข้อมูลนี้จะถูกลบออกจากฐานข้อมูล VCC_tracking อย่างถาวร</p>
+                   </div>\,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            cancelButtonColor: '#94a3b8',
+            confirmButtonText: '<i class="fas fa-trash-alt me-1"></i> ลบรายการ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (!res.isConfirmed) return;
+
+        showLoading('กำลังลบข้อมูลการติดตาม...');
+
+        // Delete from Supabase
+        if (typeof SUPABASE_CLIENT !== 'undefined' && SUPABASE_CLIENT) {
+            let q = SUPABASE_CLIENT.from('VCC_tracking').delete();
+            if (item.Timestamp) q = q.eq('Timestamp', item.Timestamp);
+            if (item.Reporter) q = q.eq('Reporter', item.Reporter);
+            if (item.ChildId) q = q.eq('ChildId', item.ChildId);
+            let { error } = await q;
+            if (error) throw error;
+        }
+
+        // Delete from local cache
+        if (APP.trackingData && Array.isArray(APP.trackingData)) {
+            APP.trackingData = APP.trackingData.filter(t => {
+                if (item.Timestamp && t.Timestamp === item.Timestamp && item.Reporter && t.Reporter === item.Reporter) return false;
+                if (item.ChildId && t.ChildId === item.ChildId && item.Timestamp && t.Timestamp === item.Timestamp) return false;
+                return true;
+            });
+        }
+
+        await logActivity('DELETE_TRACKING', \ลบประวัติการติดตาม \ (\)\);
+        hideLoading();
+        Swal.fire({ icon: 'success', title: 'ลบข้อมูลสำเร็จ', timer: 1500, showConfirmButton: false });
+
+        if (typeof renderTrackingReportTable === 'function') {
+            renderTrackingReportTable();
+        } else if (typeof filterTrackingReport === 'function') {
+            filterTrackingReport();
+        }
+    } catch (err) {
+        hideLoading();
+        console.error('Delete tracking error:', err);
+        Swal.fire('เกิดข้อผิดพลาด', err.message || 'ไม่สามารถลบข้อมูลได้', 'error');
+    }
+};
+window.onDeleteTrackingByIndex = async function(idx) {
+    try {
+        let list = (window._currentTrackingFilteredList || APP.trackingData || []);
+        let item = list[idx];
+        if (!item) {
+            Swal.fire('ข้อผิดพลาด', 'ไม่พบข้อมูลรายการที่ต้องการลบ', 'error');
+            return;
+        }
+
+        let res = await Swal.fire({
+            title: 'ยืนยันการลบรายการติดตาม?',
+            html: '<div style="text-align:left;font-size:0.95rem;color:#475569;line-height:1.7;">' +
+                    '<p><strong>ชื่อเด็ก:</strong> ' + (item.ChildName || '-') + '</p>' +
+                    '<p><strong>ผู้บันทึก:</strong> ' + (item.Reporter || '-') + '</p>' +
+                    '<p><strong>วันที่ติดตาม:</strong> ' + (item.Timestamp || '-') + '</p>' +
+                    '<p><strong>ผลการติดตาม:</strong> ' + (item.Status || '-') + '</p>' +
+                    '<p style="color:#ef4444;margin-top:10px;"><i class="fas fa-exclamation-triangle"></i> ข้อมูลนี้จะถูกลบออกจากฐานข้อมูลอย่างถาวร</p>' +
+                   '</div>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            cancelButtonColor: '#94a3b8',
+            confirmButtonText: '<i class="fas fa-trash-alt me-1"></i> ยืนยันลบ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (!res.isConfirmed) return;
+
+        showLoading('กำลังลบข้อมูลการติดตาม...');
+
+        // Delete from Supabase
+        if (typeof SUPABASE_CLIENT !== 'undefined' && SUPABASE_CLIENT) {
+            let q = SUPABASE_CLIENT.from('VCC_tracking').delete();
+            if (item.Timestamp) q = q.eq('Timestamp', item.Timestamp);
+            if (item.Reporter) q = q.eq('Reporter', item.Reporter);
+            if (item.ChildId) q = q.eq('ChildId', item.ChildId);
+            let { error } = await q;
+            if (error) {
+                console.warn('Supabase delete warning:', error);
+            }
+        }
+
+        // Delete from local memory
+        if (APP.trackingData && Array.isArray(APP.trackingData)) {
+            APP.trackingData = APP.trackingData.filter(t => t !== item);
+        }
+        if (window._currentTrackingFilteredList && Array.isArray(window._currentTrackingFilteredList)) {
+            window._currentTrackingFilteredList = window._currentTrackingFilteredList.filter(t => t !== item);
+        }
+
+        await logActivity('DELETE_TRACKING', 'ลบประวัติการติดตาม ' + (item.ChildName || '') + ' (' + (item.ChildId || '') + ')');
+        hideLoading();
+        Swal.fire({ icon: 'success', title: 'ลบรายการเรียบร้อยแล้ว', timer: 1500, showConfirmButton: false });
+
+        // Refresh tracking report view
+        if (typeof renderTrackingReportTable === 'function') {
+            renderTrackingReportTable();
+        } else if (typeof filterTrackingReport === 'function') {
+            filterTrackingReport();
+        }
+    } catch (err) {
+        hideLoading();
+        console.error('Delete tracking error:', err);
+        Swal.fire('เกิดข้อผิดพลาด', err.message || 'ไม่สามารถลบข้อมูลได้', 'error');
+    }
+};
+window.onEditTrackingClick = function(idx) { const r = (APP.rptAllRecords || [])[idx]; if (!r) return Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลรายการ', 'error'); openEditTrackingModal(r); };
     window.openEditTrackingModal = function(r) {
         if (typeof r === 'string') {
             try { r = JSON.parse(r); } catch(e) { return Swal.fire('ผิดพลาด', 'ไม่สามารถอ่านข้อมูลได้', 'error'); }
