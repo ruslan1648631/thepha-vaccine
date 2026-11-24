@@ -20726,7 +20726,7 @@ function updateBottomNavActive(page) {
                             '" target="_blank"><i class="fas fa-map-marker-alt"></i> ดูแผนที่</a>' :
                             '<span style="color:#ccc;font-size:12px">-</span>') + '</td>' +
                         '<td style="font-size:12px;color:#888">' + esc(r.files || '-') + '</td>' +
-                        '<td style="white-space:nowrap;"><button class="action-btn edit" title="แก้ไขการติดตาม" onclick="window.onEditTrackingClick(' + idx + ')" style="font-size:11px;"><i class="fas fa-edit"></i> แก้ไข</button>' + ((APP.currentUser && (APP.currentUser.role === 'admin' || APP.currentUser.role === 'staff_amp')) ? ' <button class="action-btn delete" title="ลบรายการติดตาม" onclick="window.onDeleteTrackingByIndex(' + idx + ')" style="font-size:11px;background:#fee2e2;color:#ef4444;border:1px solid #fca5a5;padding:3px 8px;border-radius:6px;cursor:pointer;"><i class="fas fa-trash-alt"></i> ลบ</button>' : '') + '</td>' +
+                        '<td style="white-space:nowrap;"><button class="action-btn edit" title="แก้ไขการติดตาม" onclick="window.onEditTrackingClick(' + idx + ')" style="font-size:11px;"><i class="fas fa-edit"></i> แก้ไข</button>' + ((APP.currentUser && (APP.currentUser.role === 'Admin_Ampur' || APP.currentUser.role === 'Admin_HOS' || APP.currentUser.role === 'admin' || APP.currentUser.role === 'staff_amp' || (typeof isAdminAmpurUser === 'function' && isAdminAmpurUser()))) ? ' <button class="action-btn delete" title="ลบรายการติดตามนี้" onclick="window.onDeleteTrackingByIndex(' + idx + ')" style="font-size:11px;background:#fee2e2;color:#ef4444;border:1px solid #fca5a5;padding:3px 8px;border-radius:6px;cursor:pointer;margin-left:4px;"><i class="fas fa-trash-alt"></i> ลบ</button>' : '') + '</td>' +
                         '</tr>';
                 }).join('') :
                 '') +
@@ -22948,21 +22948,30 @@ window.confirmClearOldAppointments = async function() {
     };
 window.onDeleteTrackingByIndex = async function(idx) {
     try {
-        let list = (window._currentTrackingFilteredList || APP.trackingData || []);
+        let list = (window._currentTrackingFilteredList && window._currentTrackingFilteredList.length > 0) 
+            ? window._currentTrackingFilteredList 
+            : (APP.rptAllRecords && APP.rptAllRecords.length > 0 ? APP.rptAllRecords : (APP.trackingData || []));
+        
         let item = list[idx];
         if (!item) {
-            Swal.fire('ข้อผิดพลาด', 'ไม่พบข้อมูลรายการที่ต้องการลบ', 'error');
-            return;
+            return Swal.fire('ข้อผิดพลาด', 'ไม่พบข้อมูลรายการที่ต้องการลบ', 'error');
         }
 
+        const childName = item.childName || item.ChildName || '-';
+        const reporter = item.reporter || item.Reporter || '-';
+        const timestamp = item.timestamp || item.Timestamp || '-';
+        const status = item.status || item.Status || '-';
+        const rawTime = item.rawTimestamp || item.timestamp || item.Timestamp || '';
+        const cid = item.childId || item.ChildId || item.cid || '';
+
         let res = await Swal.fire({
-            title: 'ยืนยันการลบรายการติดตาม?',
-            html: '<div style="text-align:left;font-size:0.95rem;color:#475569;line-height:1.7;">' +
-                    '<p><strong>ชื่อเด็ก:</strong> ' + (item.ChildName || '-') + '</p>' +
-                    '<p><strong>ผู้บันทึก:</strong> ' + (item.Reporter || '-') + '</p>' +
-                    '<p><strong>วันที่ติดตาม:</strong> ' + (item.Timestamp || '-') + '</p>' +
-                    '<p><strong>ผลการติดตาม:</strong> ' + (item.Status || '-') + '</p>' +
-                    '<p style="color:#ef4444;margin-top:10px;"><i class="fas fa-exclamation-triangle"></i> ข้อมูลนี้จะถูกลบออกจากฐานข้อมูลอย่างถาวร</p>' +
+            title: '<i class="fas fa-trash-alt" style="color:#ef4444;"></i> ยืนยันการลบรายการติดตาม?',
+            html: '<div style="text-align:left;font-size:0.95rem;color:#475569;line-height:1.7;background:#f8fafc;padding:12px 16px;border-radius:8px;border:1px solid #e2e8f0;margin-top:10px;">' +
+                    '<p style="margin:4px 0;"><strong>ชื่อเด็ก:</strong> ' + esc(childName) + '</p>' +
+                    '<p style="margin:4px 0;"><strong>ผู้บันทึก:</strong> ' + esc(reporter) + '</p>' +
+                    '<p style="margin:4px 0;"><strong>วันที่บันทึก:</strong> ' + esc(formatDateTime(timestamp) || timestamp) + '</p>' +
+                    '<p style="margin:4px 0;"><strong>ผลการติดตาม:</strong> ' + esc(status) + '</p>' +
+                    '<p style="color:#ef4444;margin:8px 0 0 0;font-size:12px;"><i class="fas fa-exclamation-triangle"></i> ข้อมูลนี้จะถูกลบออกจากฐานข้อมูลอย่างถาวร</p>' +
                    '</div>',
             icon: 'warning',
             showCancelButton: true,
@@ -22976,19 +22985,38 @@ window.onDeleteTrackingByIndex = async function(idx) {
 
         showLoading('กำลังลบข้อมูลการติดตาม...');
 
-        // Delete from Supabase
-        if (typeof SUPABASE_CLIENT !== 'undefined' && SUPABASE_CLIENT) {
-            let q = SUPABASE_CLIENT.from('VCC_tracking').delete();
-            if (item.Timestamp) q = q.eq('Timestamp', item.Timestamp);
-            if (item.Reporter) q = q.eq('Reporter', item.Reporter);
-            if (item.ChildId) q = q.eq('ChildId', item.ChildId);
-            let { error } = await q;
-            if (error) {
-                console.warn('Supabase delete warning:', error);
+        // 1. Delete from Supabase VCC_tracking
+        if (typeof supabaseClient !== 'undefined' && supabaseClient) {
+            let q = supabaseClient.from('VCC_tracking').delete();
+            let hasCondition = false;
+            if (rawTime) { q = q.eq('Timestamp', rawTime); hasCondition = true; }
+            else if (timestamp && timestamp !== '-') { q = q.eq('Timestamp', timestamp); hasCondition = true; }
+            
+            if (reporter && reporter !== '-') { q = q.eq('Reporter', reporter); hasCondition = true; }
+            if (cid && cid !== '-') { q = q.eq('ChildId', cid); hasCondition = true; }
+
+            if (hasCondition) {
+                let { error } = await q;
+                if (error) console.warn('Supabase delete VCC_tracking warning:', error);
             }
         }
 
-        // Delete from local memory
+        // 2. Delete from Supabase Activity_log if needed or call GAS delete
+        try {
+            if (typeof callGAS === 'function') {
+                await callGAS('deleteTrackingRecord', [{
+                    timestamp: rawTime || timestamp,
+                    reporter: reporter,
+                    childName: childName,
+                    childId: cid
+                }]);
+            }
+        } catch(e) { console.warn('callGAS deleteTrackingRecord ignored:', e); }
+
+        // 3. Remove from in-memory arrays
+        if (APP.rptAllRecords && Array.isArray(APP.rptAllRecords)) {
+            APP.rptAllRecords = APP.rptAllRecords.filter(t => t !== item);
+        }
         if (APP.trackingData && Array.isArray(APP.trackingData)) {
             APP.trackingData = APP.trackingData.filter(t => t !== item);
         }
@@ -22996,15 +23024,17 @@ window.onDeleteTrackingByIndex = async function(idx) {
             window._currentTrackingFilteredList = window._currentTrackingFilteredList.filter(t => t !== item);
         }
 
-        await logActivity('DELETE_TRACKING', 'ลบประวัติการติดตาม ' + (item.ChildName || '') + ' (' + (item.ChildId || '') + ')');
+        await logActivity('DELETE_TRACKING', 'ลบประวัติการติดตาม ' + childName + ' (ผู้บันทึก: ' + reporter + ')');
         hideLoading();
         Swal.fire({ icon: 'success', title: 'ลบรายการเรียบร้อยแล้ว', timer: 1500, showConfirmButton: false });
 
-        // Refresh tracking report view
-        if (typeof renderTrackingReportTable === 'function') {
-            renderTrackingReportTable();
-        } else if (typeof filterTrackingReport === 'function') {
+        // 4. Re-render table
+        if (typeof filterTrackingReport === 'function') {
             filterTrackingReport();
+        } else if (typeof renderRptTable === 'function') {
+            renderRptTable(APP.rptAllRecords || [], (APP.rptAllRecords || []).length);
+        } else if (typeof renderTrackingReportTable === 'function') {
+            renderTrackingReportTable();
         }
     } catch (err) {
         hideLoading();
