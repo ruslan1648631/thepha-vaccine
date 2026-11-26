@@ -8097,11 +8097,10 @@
                 };
 
                 // แคชข้อมูลลง CHILD_DETAIL_MAP เพื่อให้คลิกดูรายละเอียดประวัติวัคซีน (viewChildFromMap) ได้ทันที
-                if (window.CHILD_DETAIL_MAP) {
-                    if (cleanChild.id) window.CHILD_DETAIL_MAP[String(cleanChild.id).trim()] = cleanChild;
-                    if (cleanChild.hn) window.CHILD_DETAIL_MAP[String(cleanChild.hn).trim()] = cleanChild;
-                    if (cleanChild.cid) window.CHILD_DETAIL_MAP[String(cleanChild.cid).trim()] = cleanChild;
-                }
+                window.CHILD_DETAIL_MAP = window.CHILD_DETAIL_MAP || {};
+                if (cleanChild.id && cleanChild.id !== '-') window.CHILD_DETAIL_MAP[String(cleanChild.id).trim()] = cleanChild;
+                if (cleanChild.hn && cleanChild.hn !== '-') window.CHILD_DETAIL_MAP[String(cleanChild.hn).trim()] = cleanChild;
+                if (cleanChild.cid && cleanChild.cid !== '-') window.CHILD_DETAIL_MAP[String(cleanChild.cid).trim()] = cleanChild;
 
                 return cleanChild;
             });
@@ -9809,7 +9808,7 @@
                 subdistrict: raw.subdistname || raw.subdistrict || raw['ตำบล'] || '-',
                 hcode: rowHcode,
                 hname: raw.hname || getFacilityDisplayName(rowHcode, raw.hospital),
-                asm: raw.VHV || raw.vhv || raw.asm || row['อสม.'] || row['อสม'] || '-',
+                asm: raw.VHV || raw.vhv || raw.asm || raw['อสม.'] || raw['อสม'] || '-',
                 phone: raw.phone || row['โทรศัพท์'] || '-',
                 gps: raw.GPS || raw.gps || raw['พิกัด'] || '-',
                 school: raw.school || raw.School || raw['โรงเรียน'] || raw['ศพด'] || '-',
@@ -26403,7 +26402,7 @@ async function doDistrictChildSearch() {
                 '<td style="white-space:nowrap; text-align:center;">' +
                     quickCallBtn +
                     quickNavBtn +
-                    '<button class="action-btn view" style="background:#0284c7; color:white; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:500; display:inline-flex; align-items:center; gap:5px;" title="ดูประวัติการฉีดวัคซีนสมบูรณ์" onclick="viewChildFromMap(\'' + esc(targetChildId) + '\')">' +
+                    '<button class="action-btn view" style="background:#0284c7; color:white; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:500; display:inline-flex; align-items:center; gap:5px;" title="ดูประวัติการฉีดวัคซีนสมบูรณ์" onclick="viewChildFromMap(\'' + esc(targetChildId) + '\',\'' + esc(c.fullname || '') + '\')">' +
                         '<i class="fas fa-eye"></i> ดูประวัติวัคซีน' +
                     '</button> ' +
                     '<select class="status-select" title="เปลี่ยนสถานะ" onchange="changeStatus(\'' + esc(c.fullname) + '\',this)" data-childid="' + esc(targetChildId) + '">' +
