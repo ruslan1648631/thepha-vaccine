@@ -9622,41 +9622,45 @@
             const cleanDigits = childId.replace(/\D/g, '');
             let data = null;
 
-            // 1. ค้นหาด้วย CID (13 หลัก)
+            // 1. ค้นหาด้วย CID (13 หลัก) — ดึงทุกแถวที่ตรงกันเพื่อรวมประวัติวัคซีนข้ามสถานพยาบาล
             if (cleanDigits.length === 13) {
                 try {
-                    const { data: byCid, error: cidErr } = await supabaseClient.from('data').select('*').eq('CID', cleanDigits).limit(1);
+                    const { data: byCid, error: cidErr } = await supabaseClient.from('data').select('*').eq('CID', cleanDigits);
                     if (!cidErr && byCid && byCid.length > 0) data = byCid;
                 } catch(e) {}
             }
 
             // 2. ค้นหาด้วย HN (ตัวเลข 1-10 หลัก)
-            if (!data && cleanDigits.length > 0 && cleanDigits.length <= 10) {
+            if ((!data || data.length === 0) && cleanDigits.length > 0 && cleanDigits.length <= 10) {
                 try {
-                    const { data: byHn, error: hnErr } = await supabaseClient.from('data').select('*').eq('HN', cleanDigits).limit(1);
+                    const { data: byHn, error: hnErr } = await supabaseClient.from('data').select('*').eq('HN', cleanDigits);
                     if (!hnErr && byHn && byHn.length > 0) data = byHn;
                 } catch(e) {}
             }
 
             // 3. ค้นหาด้วย CID หรือ HN (or query)
-            if (!data && cleanDigits.length > 0) {
+            if ((!data || data.length === 0) && cleanDigits.length > 0) {
                 try {
-                    const { data: byOr, error: orErr } = await supabaseClient.from('data').select('*').or('CID.eq.' + cleanDigits + ',HN.eq.' + cleanDigits).limit(1);
+                    const { data: byOr, error: orErr } = await supabaseClient.from('data').select('*').or('CID.eq.' + cleanDigits + ',HN.eq.' + cleanDigits);
                     if (!orErr && byOr && byOr.length > 0) data = byOr;
                 } catch(e) {}
             }
 
-            // 4. ค้นหาด้วยชื่อ-สกุล (fullname ilike)
-            if (!data && childId.length >= 2) {
+            // 4. ค้นหาด้วยชื่อ-สกุล (fullname) หรือกรณี CID/HN มีขีด/เลข 0 นำหน้า
+            if (!data || data.length === 0) {
                 try {
                     const cleanName = childId.replace(/[\'\"\%\_]/g, '').trim();
-                    if (cleanName) {
-                        // ใช้ fetchAllFromTable กรองฝั่ง JS เพื่อหลีกเลี่ยง ilike บน bigint column
+                    if (cleanName && cleanName.length >= 2) {
                         const allByName = await fetchAllFromTable('data', '*');
-                        const matchedByName = allByName.filter(r => {
+                        const stripP = (s) => String(s || '').replace(/^(เด็กชาย|เด็กหญิง|ด\.ช\.|ด\.ญ\.|ด\.ช|ด\.ญ|นาย|นางสาว|น\.ส\.)\s*/i, '').replace(/\s+/g, '').toLowerCase();
+                        const tNorm = stripP(cleanName);
+                        const matchedByName = (allByName || []).filter(r => {
+                            const rCid = String(r.CID || r.cid || r['เลขบัตร'] || '').replace(/\D/g, '');
+                            const rHn = String(r.HN || r.hn || r['รหัส'] || '').trim();
+                            if (cleanDigits.length >= 5 && (rCid === cleanDigits || rHn === childId || rHn.replace(/^0+/, '') === cleanDigits.replace(/^0+/, ''))) {
+                                return true;
+                            }
                             const rn = String(r.fullname || r['ชื่อ-สกุล'] || r.childname || '').toLowerCase();
-                            const stripP = (s) => String(s || '').replace(/^(เด็กชาย|เด็กหญิง|ด\.ช\.|ด\.ญ\.|ด\.ช|ด\.ญ|นาย|นางสาว|น\.ส\.)\s*/i, '').replace(/\s+/g, '').toLowerCase();
-                            const tNorm = stripP(cleanName);
                             const rNorm = stripP(rn);
                             return rn.includes(cleanName.toLowerCase()) || (tNorm.length >= 2 && (rNorm.includes(tNorm) || tNorm.includes(rNorm)));
                         });
@@ -9669,7 +9673,39 @@
                 return { success: false, message: 'ไม่พบข้อมูลเด็กในระบบ' };
             }
 
-            const raw = data[0];
+            // 4.5 หากพบแถวที่มี CID 13 หลัก ให้ดึงแถวอื่นใน data และ data_student ที่มี CID เดียวกันมารวมวัคซีนด้วย
+            let mergedRowsList = [...data];
+            const foundCidRow = data.find(r => String(r.CID || r.cid || r['เลขบัตร'] || '').replace(/\D/g, '').length === 13);
+            const foundCid13 = foundCidRow ? String(foundCidRow.CID || foundCidRow.cid || foundCidRow['เลขบัตร'] || '').replace(/\D/g, '') : (cleanDigits.length === 13 ? cleanDigits : '');
+            if (foundCid13.length === 13) {
+                if (data.length === 1 && cleanDigits.length !== 13) {
+                    try {
+                        const { data: extraData } = await supabaseClient.from('data').select('*').eq('CID', foundCid13);
+                        if (extraData && extraData.length > 0) mergedRowsList = [...mergedRowsList, ...extraData];
+                    } catch(e) {}
+                }
+                try {
+                    const { data: stRows } = await supabaseClient.from('data_student').select('*').eq('CID', foundCid13);
+                    if (stRows && stRows.length > 0) mergedRowsList = [...mergedRowsList, ...stRows];
+                } catch(e) {}
+            }
+
+            // รวมข้อมูลทุกแถวที่ตรงกันเข้าด้วยกัน (เก็บค่าที่ไม่ว่างและไม่เป็น '-' จากทุกแถว)
+            const raw = Object.assign({}, mergedRowsList[0]);
+            for (let i = 1; i < mergedRowsList.length; i++) {
+                const extra = mergedRowsList[i];
+                if (!extra) continue;
+                Object.keys(extra).forEach(k => {
+                    const ev = raw[k];
+                    const nv = extra[k];
+                    const isEmptyEv = (ev === null || ev === undefined || String(ev).trim() === '' || String(ev).trim() === '-' || String(ev).trim() === '0');
+                    const isValidNv = (nv !== null && nv !== undefined && String(nv).trim() !== '' && String(nv).trim() !== '-' && String(nv).trim() !== '0');
+                    if (isEmptyEv && isValidNv) {
+                        raw[k] = nv;
+                    }
+                });
+            }
+
             const refusedSet = new Set();
             try {
                 const { data: tData } = await supabaseClient
@@ -9682,8 +9718,9 @@
                     tData.forEach(t => {
                         const tid = String(t.ChildId || '').trim();
                         const tname = String(t.ChildName || '').trim();
-                        if (tid === cStr || (rName && tname === rName)) {
+                        if (tid === cStr || (foundCid13 && tid === foundCid13) || (rName && tname === rName)) {
                             refusedSet.add(childId);
+                            if (foundCid13) refusedSet.add(foundCid13);
                         }
                     });
                 }
@@ -9693,16 +9730,18 @@
             const vaccinesList = [];
             const knownVaccinesConfig = [
                 { code: 'BCG', alts: ['BCG', 'bcg'] },
-                { code: 'HBV1', alts: ['HBV1', 'hbv1', 'HB1', 'hepb1'] },
-                { code: 'DTP+HB+Hib1', alts: ['DTP+HB+Hib1', 'dtp+hb+hib1', 'DTP-HB1', 'dtphbhib1', 'DTP1'] },
+                { code: 'HBV1', alts: ['HBV1', 'hbv1', 'HB1', 'hepb1', 'hb'] },
+                { code: 'DTP+HB+Hib1', alts: ['DTP+HB+Hib1', 'dtp+hb+hib1', 'DTP-HB-Hib1', 'dtp-hb-hib1', 'DTP-HB1', 'dtp-hb1', 'dtphbhib1', 'dtphb1', 'DTP1', 'dtp1'] },
+                { code: 'OPV1', alts: ['OPV1', 'opv1'] },
                 { code: 'IPV1', alts: ['IPV1', 'ipv1', 'ipv'] },
                 { code: 'Rota1', alts: ['Rota1', 'rota1', 'rota_1'] },
                 { code: 'PCV1', alts: ['PCV1', 'pcv1'] },
-                { code: 'DTP+HB+Hib2', alts: ['DTP+HB+Hib2', 'dtp+hb+hib2', 'DTP-HB2', 'dtphbhib2', 'DTP2'] },
+                { code: 'DTP+HB+Hib2', alts: ['DTP+HB+Hib2', 'dtp+hb+hib2', 'DTP-HB-Hib2', 'dtp-hb-hib2', 'DTP-HB2', 'dtp-hb2', 'dtphbhib2', 'dtphb2', 'DTP2', 'dtp2'] },
+                { code: 'OPV2', alts: ['OPV2', 'opv2'] },
                 { code: 'IPV2', alts: ['IPV2', 'ipv2'] },
                 { code: 'Rota2', alts: ['Rota2', 'rota2', 'rota_2'] },
                 { code: 'PCV2', alts: ['PCV2', 'pcv2'] },
-                { code: 'DTP+HB+Hib3', alts: ['DTP+HB+Hib3', 'dtp+hb+hib3', 'DTP-HB3', 'dtphbhib3', 'DTP3'] },
+                { code: 'DTP+HB+Hib3', alts: ['DTP+HB+Hib3', 'dtp+hb+hib3', 'DTP-HB-Hib3', 'dtp-hb-hib3', 'DTP-HB3', 'dtp-hb3', 'dtphbhib3', 'dtphb3', 'DTP3', 'dtp3'] },
                 { code: 'OPV3', alts: ['OPV3', 'opv3', 'opv'] },
                 { code: 'Rota3', alts: ['Rota3', 'rota3', 'rota_3'] },
                 { code: 'MMR1', alts: ['MMR1', 'mmr1', 'mmr'] },
@@ -9715,11 +9754,30 @@
                 { code: 'DTP5', alts: ['DTP5', 'dtp5'] },
                 { code: 'OPV5', alts: ['OPV5', 'opv5'] }
             ];
+
+            // สร้างแผนที่คอลัมน์แบบ normalize เพื่อรองรับชื่อคอลัมน์ต่างรูปแบบ/ตัวพิมพ์เล็ก-ใหญ่
+            const rawNormMap = {};
+            Object.keys(raw).forEach(k => {
+                const v = raw[k];
+                if (v !== undefined && v !== null) {
+                    const s = String(v).trim();
+                    if (s !== '' && s !== '-' && s !== '0' && s.toLowerCase() !== 'null' && s.toLowerCase() !== 'false') {
+                        const nk = k.toLowerCase().replace(/[-\s_.+]/g, '');
+                        if (!rawNormMap[nk]) rawNormMap[nk] = v;
+                    }
+                }
+            });
+
             knownVaccinesConfig.forEach(v => {
                 let cellVal = null;
                 for (const alt of v.alts) {
-                    if (raw[alt] !== undefined && raw[alt] !== null && String(raw[alt]).trim() !== '' && String(raw[alt]).trim() !== '-') {
+                    if (raw[alt] !== undefined && raw[alt] !== null && String(raw[alt]).trim() !== '' && String(raw[alt]).trim() !== '-' && String(raw[alt]).trim() !== '0') {
                         cellVal = raw[alt];
+                        break;
+                    }
+                    const nAlt = alt.toLowerCase().replace(/[-\s_.+]/g, '');
+                    if (rawNormMap[nAlt] !== undefined) {
+                        cellVal = rawNormMap[nAlt];
                         break;
                     }
                 }
@@ -9765,23 +9823,46 @@
 
             let trackingHistory = [];
             try {
-                const cIdNum = Number(childId.replace(/\D/g, '')) || 0;
+                const cIdNum = Number(foundCid13 || childId.replace(/\D/g, '')) || 0;
                 const rName = String(childObj.fullname || '').trim();
                 let histQ = supabaseClient.from('VCC_tracking').select('*').order('Timestamp', { ascending: false }).limit(20);
-                if (cIdNum > 0) {
+                if (cIdNum > 0 && rName && rName !== '-') {
                     histQ = histQ.or(`ChildId.eq.${cIdNum},ChildName.eq.${rName}`);
-                } else if (rName) {
+                } else if (cIdNum > 0) {
+                    histQ = histQ.eq('ChildId', cIdNum);
+                } else if (rName && rName !== '-') {
                     histQ = histQ.eq('ChildName', rName);
                 }
                 const { data: hist } = await histQ;
                 if (hist) {
-                    trackingHistory = hist.map(h => ({
-                        date: formatThaiDate(h.VisitDate || h.Timestamp),
-                        vaccine: h.Vaccine || '-',
-                        status: h.Status || '-',
-                        remarks: h.Remarks || '-',
-                        reporter: h.Reporter || '-'
-                    }));
+                    const existingVacNames = new Set(vaccinesList.map(v => String(v.name || '').toLowerCase().replace(/[-\s_.+]/g, '')));
+                    hist.forEach(h => {
+                        const tDate = (typeof formatThaiDateShort === 'function') ? formatThaiDateShort(h.VisitDate || h.Timestamp) : formatThaiDate(h.VisitDate || h.Timestamp);
+                        const hVac = String(h.Vaccine || '').trim();
+                        const hStatus = String(h.Status || '').trim();
+                        trackingHistory.push({
+                            date: formatThaiDate(h.VisitDate || h.Timestamp),
+                            vaccine: hVac || '-',
+                            status: hStatus || '-',
+                            remarks: h.Remarks || '-',
+                            reporter: h.Reporter || '-'
+                        });
+                        // รวมวัคซีนที่ฉีดแล้วจากรายงานติดตามเข้าใน vaccinesList หากยังไม่มีในข้อมูลฐาน
+                        const isGivenStatus = ['ตามนัดปกติ', 'ฉีดแล้วที่อื่น', 'ครบตามเกณฑ์', 'ยินยอมฉีดวัคซีนตามนัด'].includes(hStatus);
+                        if (isGivenStatus && hVac && hVac !== '-' && hVac !== 'ทั่วไป') {
+                            hVac.split(/[,/]+/).map(s => s.trim()).filter(Boolean).forEach(vn => {
+                                const nvn = vn.toLowerCase().replace(/[-\s_.+]/g, '');
+                                if (nvn && !existingVacNames.has(nvn)) {
+                                    existingVacNames.add(nvn);
+                                    vaccinesList.push({
+                                        name: vn,
+                                        date: tDate || '-',
+                                        source: 'รายงานติดตาม'
+                                    });
+                                }
+                            });
+                        }
+                    });
                 }
             } catch (hErr) {}
 
@@ -14450,7 +14531,8 @@ function updateBottomNavActive(page) {
         if (c.id) window.CHILD_DETAIL_MAP[String(c.id).trim()] = c;
         if (c.hn) window.CHILD_DETAIL_MAP[String(c.hn).trim()] = c;
         if (c.cid) window.CHILD_DETAIL_MAP[String(c.cid).trim()] = c;
-        const vaccineRows = (c.vaccines || []).map(function(vacData) {
+        const resolvedVaccines = (typeof extractChildVaccineList === 'function') ? extractChildVaccineList(c) : (c.vaccines || []);
+        const vaccineRows = resolvedVaccines.map(function(vacData) {
             const sourceBadge = vacData.source === 'รายงานติดตาม' ?
                 '<span style="font-size:10px; background:#dcfce7; color:#059669; padding:2px 6px; border-radius:4px; margin-left:8px;">ติดตาม</span>' :
                 '<span style="font-size:10px; background:#e0f2fe; color:#0284c7; padding:2px 6px; border-radius:4px; margin-left:8px;">ข้อมูลฐาน</span>';
@@ -25904,7 +25986,7 @@ async function doOutOfAreaChildSearch() {
                     '<td style="white-space:nowrap;">' +
                         quickCallBtn +
                         quickNavBtn +
-                        '<button class="action-btn view" title="รายละเอียดประวัติวัคซีน" onclick="viewChildFromMap(\'' + esc((c.id && c.id !== '-' && c.id !== '0') ? c.id : (c.hn && c.hn !== '-' ? c.hn : (c.cid || ''))) + '\')"><i class="fas fa-eye"></i></button> ' +
+                        '<button class="action-btn view" title="รายละเอียดประวัติวัคซีน" onclick="viewChildFromMap(\'' + esc((c.id && c.id !== '-' && c.id !== '0') ? c.id : (c.hn && c.hn !== '-' ? c.hn : (c.cid || ''))) + '\',\'' + esc(c.fullname || '') + '\')"><i class="fas fa-eye"></i></button> ' +
                         '<select class="status-select" title="เปลี่ยนสถานะ" onchange="changeStatus(\'' + esc(c.fullname) + '\',this)" data-childid="' + esc(c.id || c.hn) + '">' +
                             '<option value="">เปลี่ยนสถานะ</option>' + statusOpts +
                         '</select>' +
