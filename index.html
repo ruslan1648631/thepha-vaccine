@@ -32521,9 +32521,14 @@ window.exportDtpBySchoolExcel = async function() {
             const vRes = await callGAS('getVillages', [userRole, userHcode]);
             let villages = (vRes.success ? vRes.villages : []).map(v => v.name || v.village_name || v);
 
-            // ถ้าเป็น อสม. และมีหมู่บ้านประจำตัว ให้กรองให้เหลือเฉพาะหมู่บ้านตนเอง
+            // ถ้าเป็น อสม. และมีหมู่บ้านประจำตัว ให้กรองให้เหลือเฉพาะหมู่บ้านตนเอง (เทียบเลขหมู่แบบตรงตัว)
             if (isVHV && userVillage) {
-                const matched = villages.filter(v => v.includes(userVillage) || userVillage.includes(v));
+                const uDigits = String(userVillage).replace(/\D/g, '').replace(/^0+/, '');
+                const matched = villages.filter(v => {
+                    const vDigits = String(v).replace(/\D/g, '').replace(/^0+/, '');
+                    if (uDigits && vDigits) return vDigits === uDigits;
+                    return v === userVillage;
+                });
                 villages = matched.length > 0 ? matched : [userVillage];
             }
 
@@ -32664,6 +32669,55 @@ window.exportDtpBySchoolExcel = async function() {
 
     let _ftSelectedChild = null;
 
+    function extractMooDigits(val) {
+        const s = String(val || '').trim();
+        if (!s || s === '-') return '';
+        const m = s.match(/^(?:หมู่ที่|หมู่|ม\.)?\s*0*(\d+)/i);
+        if (m) return m[1];
+        const m2 = s.match(/(?:หมู่ที่|หมู่|ม\.)\s*0*(\d+)/i);
+        if (m2) return m2[1];
+        if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+        return '';
+    }
+
+    function isSameVillageAndArea(c, userHcode, userVillage, userSubdist, allowedVillages) {
+        const uHcodeNorm = String(userHcode || '').trim().replace(/^0+/, '');
+        const cHcode = String(c.hcode || '').trim();
+        const cHcodeNorm = cHcode.replace(/^0+/, '');
+        if (uHcodeNorm && uHcodeNorm !== '-' && cHcodeNorm && cHcodeNorm !== '-') {
+            if (cHcodeNorm !== uHcodeNorm) return false;
+        }
+
+        const uSubNorm = String(userSubdist || '').replace(/^(ต\.|ตำบล)\s*/i, '').trim();
+        const cSubNorm = String(c.subdistrict || c.subdistname || '').replace(/^(ต\.|ตำบล)\s*/i, '').trim();
+        if (uSubNorm && uSubNorm !== '-' && cSubNorm && cSubNorm !== '-') {
+            if (cSubNorm !== uSubNorm && !cSubNorm.includes(uSubNorm) && !uSubNorm.includes(cSubNorm)) return false;
+        }
+
+        const uMooDigits = extractMooDigits(userVillage);
+        const cMooDigits = extractMooDigits(c.village || c.moo || '');
+        const cVillName = String(c.villageName || c.villname || '').trim();
+        const cVillNameDigits = extractMooDigits(cVillName);
+
+        if (userVillage) {
+            if (uMooDigits) {
+                if (cMooDigits && cMooDigits === uMooDigits) return true;
+                if (cVillNameDigits && cVillNameDigits === uMooDigits) return true;
+                return false;
+            }
+            return cVillName === userVillage || cVillName.includes(userVillage) || userVillage.includes(cVillName);
+        }
+
+        if (allowedVillages && allowedVillages.length > 0) {
+            return allowedVillages.some(v => {
+                const vDigits = extractMooDigits(v);
+                if (vDigits && cMooDigits) return vDigits === cMooDigits;
+                return v === cVillName || (cVillName && (cVillName.includes(v) || v.includes(cVillName)));
+            });
+        }
+        return true;
+    }
+
     window.doFastTrackSearch = async function() {
         const moo = document.getElementById('ft_moo') ? document.getElementById('ft_moo').value.trim() : '';
         const q   = document.getElementById('ft_search') ? document.getElementById('ft_search').value.trim() : '';
@@ -32678,46 +32732,47 @@ window.exportDtpBySchoolExcel = async function() {
             const userRole = APP.currentUser.role || 'เจ้าหน้าที่';
             const userHcode = APP.currentUser.hcode || '';
             const userVillage = (APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village.trim() : '';
+            const userSubdist = (APP.currentUser.subdistrict && APP.currentUser.subdistrict !== '-') ? APP.currentUser.subdistrict.trim() : '';
             const isVHV = (userRole === 'อสม.' || userRole === 'VHV' || (!isAdminAmpurUser() && !isAdminHOSUser() && userRole !== 'เจ้าหน้าที่'));
             const allowedVillages = window._currentAllowedVillages || [];
 
             let results = [];
             if (q) {
-                // ค้นหาผ่าน searchChild เพื่อรองรับทั้งชื่อ-สกุล, CID, HN อย่างแม่นยำ ไม่ติดข้อจำกัดประเภทข้อมูล bigint
+                // ค้นหาจากข้อมูลเด็กในพื้นที่/ทั้งหมดอย่างแม่นยำ
                 const sRes = await callGAS('searchChild', [q]);
                 results = (sRes && sRes.success) ? (sRes.children || []) : [];
                 if (moo && results.length > 0) {
+                    const selMooDigits = extractMooDigits(moo);
                     results = results.filter(c => {
-                        const vName = String(c.villageName || c.villname || c.village || '').trim();
-                        const vMoo  = String(c.village || c.moo || '').trim();
-                        return vName.includes(moo) || moo.includes(vName) || vMoo === moo;
+                        const vName = String(c.villageName || c.villname || '').trim();
+                        const vMooDigits = extractMooDigits(c.village || c.moo || '');
+                        if (selMooDigits && vMooDigits) return vMooDigits === selMooDigits;
+                        return vName === moo || vName.includes(moo) || moo.includes(vName);
                     });
                 }
             } else if (moo) {
-                // กรณีเลือกเฉพาะหมู่บ้าน ดึงรายชื่อเด็กในหมู่บ้านนั้น
-                const allData = await fetchAllFromTable('data');
+                // กรณีเลือกเฉพาะหมู่บ้าน ดึงรายชื่อเด็กในหมู่บ้านนั้น (กรอง hcode ด้วยหากไม่ใช่ระดับอำเภอ)
+                const allData = await fetchAllFromTable('data', '*', !isAmpur && userHcode && userHcode !== '-' ? (qb => {
+                    const unp = userHcode.replace(/^0+/, '');
+                    const pad = userHcode.padStart(5, '0');
+                    return qb.or(`hcode.eq.${userHcode},hcode.eq.${unp},hcode.eq.${pad}`);
+                }) : null);
+                const selMooDigits = extractMooDigits(moo);
                 results = (allData || []).filter(c => {
-                    const vName = String(c.villname || c.villageName || c.village || '').trim();
-                    const vMoo  = String(c.moo || c.village || '').trim();
-                    return vName.includes(moo) || moo.includes(vName) || vMoo === moo;
+                    const vName = String(c.villname || c.villageName || '').trim();
+                    const vMooDigits = extractMooDigits(c.moo || c.village || '');
+                    if (selMooDigits && vMooDigits) return vMooDigits === selMooDigits;
+                    return vName === moo || vName.includes(moo) || moo.includes(vName);
                 });
             }
 
-            // ✅ กรองความปลอดภัย: แสดงเฉพาะเด็กในสถานพยาบาลหรือหมู่บ้านที่ตนเองรับผิดชอบ
+            // ✅ กรองความปลอดภัย: แสดงเฉพาะเด็กในสถานพยาบาล ตำบล และหมู่บ้านที่ตนเองรับผิดชอบ
             if (!isAmpur) {
                 results = results.filter(c => {
-                    const cHcode = String(c.hcode || '').trim();
-                    const cVill  = String(c.villageName || c.villname || c.village || c.moo || '').trim();
-
-                    // ถ้าเป็น อสม. ที่มีหมู่บ้านประจำ: ต้องเป็นเด็กในหมู่บ้านตนเองเท่านั้น
                     if (isVHV && userVillage) {
-                        return cVill && (cVill === userVillage || cVill.includes(userVillage) || userVillage.includes(cVill));
+                        return isSameVillageAndArea(c, userHcode, userVillage, userSubdist, allowedVillages);
                     }
-
-                    // ถ้าเป็นเจ้าหน้าที่ หรือ อสม.ทั่วไป: ต้องตรงกับสถานพยาบาลตนเอง หรืออยู่ในหมู่บ้านที่ได้รับอนุญาต
-                    const matchHcode = (userHcode && userHcode !== '-') ? (cHcode === userHcode || cHcode === userHcode.replace(/^0+/, '') || cHcode === userHcode.padStart(5, '0')) : true;
-                    const matchVill = allowedVillages.some(v => v === cVill || cVill.includes(v) || v.includes(cVill));
-                    return matchHcode || matchVill;
+                    return isSameVillageAndArea(c, userHcode, '', userSubdist, allowedVillages);
                 });
             }
 
@@ -32757,7 +32812,8 @@ window.exportDtpBySchoolExcel = async function() {
         document.getElementById('ft_recordCard').style.display = 'block';
         
         const name = c.fullname || c.childName || '-';
-        const dob  = c.birthDate || c.DOB || '-';
+        const rawDob = c.birthDate || c.DOB || '-';
+        const dob  = (rawDob && rawDob !== '-' && typeof formatDate === 'function') ? formatDate(rawDob) : rawDob;
         const age  = c.age || calcAge(c.birthDate || c.DOB);
         const vill = c.villageName || c.villname || (c.village ? 'หมู่ ' + c.village : '') || (c.moo ? 'หมู่ ' + c.moo : '-');
         const hno  = c.houseNumber || c.house_no || c.house || '-';
@@ -32887,31 +32943,62 @@ window.exportDtpBySchoolExcel = async function() {
             if (error) throw error;
 
             const userRole = APP.currentUser.role || 'เจ้าหน้าที่';
+            const userHcode = String(APP.currentUser.hcode || '').trim().replace(/^0+/, '');
             const userVillage = (APP.currentUser.village && APP.currentUser.village !== '-') ? APP.currentUser.village.trim() : '';
+            const userSubdist = (APP.currentUser.subdistrict && APP.currentUser.subdistrict !== '-') ? APP.currentUser.subdistrict.replace(/^(ต\.|ตำบล)\s*/i, '').trim() : '';
             const isVHV = (userRole === 'อสม.' || userRole === 'VHV' || (!isAdminAmpurUser() && !isAdminHOSUser() && userRole !== 'เจ้าหน้าที่'));
             const isAmpur = isAdminAmpurUser() || isSpecialOfficerUser();
             const allowedVillages = window._currentAllowedVillages || [];
 
             let filteredData = data || [];
 
-            // ✅ กรองสิทธิ์แสดงข้อมูลเฉพาะสถานพยาบาลหรือหมู่บ้านที่ อสม./เจ้าหน้าที่รับผิดชอบเท่านั้น
+            // ✅ กรองสิทธิ์แสดงข้อมูลเฉพาะสถานพยาบาล หมู่บ้าน และตำบลที่ อสม./เจ้าหน้าที่รับผิดชอบเท่านั้น
             if (!isAmpur) {
+                const uMooDigits = extractMooDigits(userVillage);
+                const myName = String(APP.currentUser.fullname || APP.currentUser.name || '').trim();
+                const myUser = String(APP.currentUser.username || '').trim();
+
                 filteredData = filteredData.filter(r => {
                     const rVill = String(r.Village || '').trim();
                     const rRep = String(r.Reporter || '').trim();
-                    const myName = String(APP.currentUser.fullname || APP.currentUser.name || '').trim();
-                    const myUser = String(APP.currentUser.username || '').trim();
 
-                    // 1. ถ้าเป็น อสม. ที่มีหมู่บ้านประจำ: เห็นเฉพาะหมู่บ้านตนเอง หรือเคสที่ตนเองเป็นผู้บันทึก
-                    if (isVHV && userVillage) {
-                        return (rVill && (rVill === userVillage || rVill.includes(userVillage) || userVillage.includes(rVill))) ||
-                               (rRep && (rRep === myName || rRep === myUser || rRep.includes(myUser)));
+                    // 1. เคสที่ตนเองเป็นผู้บันทึก -> แสดงเสมอ
+                    const isMyRecord = (myName && rRep === myName) || (myUser && (rRep === myUser || rRep.includes(myUser)));
+                    if (isMyRecord) return true;
+
+                    // 2. ป้องกันการปนเปื้อนจาก รพ.สต. อื่น (เช่น Reporter เป็น น09496 / น09499 / รพ.สต.อื่น)
+                    const repHcodeMatch = rRep.match(/(?:น|u|รพ\.?สต\.?)\s*0*(\d{4,5})/i);
+                    if (repHcodeMatch && userHcode && userHcode !== '-') {
+                        const repHcodeNorm = repHcodeMatch[1].replace(/^0+/, '');
+                        if (repHcodeNorm !== userHcode) return false;
                     }
 
-                    // 2. ถ้าเป็น เจ้าหน้าที่ หรือ อสม.ทั่วไป: เห็นเฉพาะหมู่บ้านในสถานพยาบาลตนเอง หรือเคสที่ตนเองเป็นผู้บันทึก
-                    const inAllowedVill = allowedVillages.some(v => v === rVill || rVill.includes(v) || v.includes(rVill));
-                    const isMyRecord = rRep && (rRep === myName || rRep === myUser || rRep.includes(myUser));
-                    return inAllowedVill || isMyRecord;
+                    // 3. ถ้าเป็น อสม. ที่มีหมู่บ้านประจำ: ต้องตรงเลขหมู่บ้านแบบตรงตัว (เช่น 1 ไม่ตรงกับ 12) และไม่ขัดแย้งกับตำบล
+                    if (isVHV && userVillage) {
+                        const rMooDigits = extractMooDigits(rVill);
+                        if (uMooDigits) {
+                            if (!rMooDigits || rMooDigits !== uMooDigits) return false;
+                            // หากในชื่อหมู่บ้านมีคำที่ไม่ตรงกับหมู่บ้านในเขตรับผิดชอบ และไม่ตรงกับตำบลตนเอง ให้ตัดออก
+                            if (userSubdist && rVill.includes('ต.') && !rVill.includes(userSubdist)) return false;
+                            if (allowedVillages.length > 0 && rVill.length > 3 && !/^\d+$/.test(rVill)) {
+                                const matchesAllowed = allowedVillages.some(av => {
+                                    const avDigits = extractMooDigits(av);
+                                    return (avDigits && avDigits === rMooDigits) || rVill.includes(av) || av.includes(rVill);
+                                });
+                                if (!matchesAllowed) return false;
+                            }
+                            return true;
+                        }
+                        return rVill && (rVill === userVillage || rVill.includes(userVillage));
+                    }
+
+                    // 4. ถ้าเป็น เจ้าหน้าที่ หรือ อสม.ทั่วไป: เห็นเฉพาะหมู่บ้านในสถานพยาบาลตนเอง
+                    const rMooDigits = extractMooDigits(rVill);
+                    return allowedVillages.some(v => {
+                        const vDigits = extractMooDigits(v);
+                        if (vDigits && rMooDigits) return vDigits === rMooDigits;
+                        return v === rVill || rVill.includes(v) || v.includes(rVill);
+                    });
                 });
             }
 
