@@ -1,10 +1,10 @@
 /**
  * VCC — Progressive Web App Service Worker
  * ระบบติดตามและเฝ้าระวังวัคซีน อำเภอเทพา
- * Cache Version: vcc-pwa-v1.0
+ * Cache Version: vcc-pwa-v1.1 (รองรับ Web Push Notification)
  */
 
-const CACHE_NAME = 'vcc-cache-v1.0';
+const CACHE_NAME = 'vcc-cache-v1.1';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -28,13 +28,11 @@ const STATIC_ASSETS = [
 
 // 1. Install Event: Cache Core Assets
 self.addEventListener('install', event => {
-    console.log('[SW] Installing VCC Service Worker...');
+    console.log('[SW] Installing VCC Service Worker v1.1...');
     event.waitUntil(
         caches.open(CACHE_NAME).then(cache => {
-            console.log('[SW] Pre-caching static assets & libraries...');
-            // ใช้ cache.addAll พร้อม error catch เพื่อไม่ให้ asset ตัวใดตัวหนึ่งบล็อกการติดตั้ง
             return Promise.allSettled(
-                STATIC_ASSETS.map(url => 
+                STATIC_ASSETS.map(url =>
                     fetch(url, { mode: 'cors' })
                         .then(res => {
                             if (res.ok) return cache.put(url, res);
@@ -48,7 +46,7 @@ self.addEventListener('install', event => {
 
 // 2. Activate Event: Clean Old Caches
 self.addEventListener('activate', event => {
-    console.log('[SW] Activating VCC Service Worker...');
+    console.log('[SW] Activating VCC Service Worker v1.1...');
     event.waitUntil(
         caches.keys().then(keys => {
             return Promise.all(
@@ -66,7 +64,6 @@ self.addEventListener('fetch', event => {
     const req = event.request;
     const url = new URL(req.url);
 
-    // ไม่แคชคำขอที่ไม่ใช่ GET (เช่น POST, DELETE, PUT)
     if (req.method !== 'GET') {
         return;
     }
@@ -75,19 +72,14 @@ self.addEventListener('fetch', event => {
     if (url.hostname.includes('supabase.co') || url.hostname.includes('script.google.com') || url.pathname.includes('/rest/v1/')) {
         event.respondWith(
             fetch(req)
-                .then(networkRes => {
-                    // ถ้าสำเร็จ ส่งข้อมูลสดใหม่คืนไป
-                    return networkRes;
-                })
+                .then(networkRes => networkRes)
                 .catch(async () => {
-                    // ถ้าเครือข่ายล่ม / ออฟไลน์
-                    console.warn('[SW] Network error for API:', req.url);
                     return new Response(
-                        JSON.stringify({ 
-                            success: false, 
-                            error: 'OFFLINE_MODE', 
-                            message: 'อุปกรณ์กำลังทำงานในโหมดออฟไลน์ กรุณาเชื่อมต่ออินเทอร์เน็ต' 
-                        }), 
+                        JSON.stringify({
+                            success: false,
+                            error: 'OFFLINE_MODE',
+                            message: 'อุปกรณ์กำลังทำงานในโหมดออฟไลน์ กรุณาเชื่อมต่ออินเทอร์เน็ต'
+                        }),
                         { headers: { 'Content-Type': 'application/json' } }
                     );
                 })
@@ -95,7 +87,7 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // B. CDN Assets (Fonts, Stylesheets, Icons, JS Libraries) — Cache-First with Background Revalidation
+    // B. CDN Assets — Cache-First with Background Revalidation
     if (
         url.hostname.includes('fonts.googleapis.com') ||
         url.hostname.includes('fonts.gstatic.com') ||
@@ -108,7 +100,6 @@ self.addEventListener('fetch', event => {
         event.respondWith(
             caches.match(req).then(cachedRes => {
                 if (cachedRes) {
-                    // คืนค่าจากแคชทันที แล้วดึงอัปเดตเบื้องหลัง (Stale-While-Revalidate)
                     fetch(req).then(networkRes => {
                         if (networkRes && networkRes.status === 200) {
                             caches.open(CACHE_NAME).then(cache => cache.put(req, networkRes));
@@ -116,7 +107,6 @@ self.addEventListener('fetch', event => {
                     }).catch(() => {});
                     return cachedRes;
                 }
-                // ถ้ายังไม่มีในแคช ดึงจากเครือข่ายแล้วบันทึกลงแคช
                 return fetch(req).then(networkRes => {
                     if (networkRes && networkRes.status === 200) {
                         const copy = networkRes.clone();
@@ -129,7 +119,7 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // C. Same-Origin Assets (HTML, Icons, Manifest) — Network-First with Cache Fallback
+    // C. Same-Origin Assets — Network-First with Cache Fallback
     event.respondWith(
         fetch(req)
             .then(networkRes => {
@@ -140,10 +130,8 @@ self.addEventListener('fetch', event => {
                 return networkRes;
             })
             .catch(async () => {
-                // ถ้าออฟไลน์ ให้ดึงจากแคช
                 const cachedRes = await caches.match(req);
                 if (cachedRes) return cachedRes;
-                // ถ้าเป็นหน้า HTML ให้คืนค่า index.html จากแคช
                 if (req.headers.get('accept') && req.headers.get('accept').includes('text/html')) {
                     return caches.match('./index.html');
                 }
@@ -151,9 +139,60 @@ self.addEventListener('fetch', event => {
     );
 });
 
-// 4. Message Event for instant updates
-self.addEventListener('message', event => {
-    if (event.data && event.data.type === 'SKIP_WAITING') {
-        self.skipWaiting();
+// 4. Web Push Event: รับการแจ้งเตือนจาก Server แม้ปิดแอปอยู่
+self.addEventListener('push', event => {
+    let payload = {
+        title: 'VCC เทพา — แจ้งเตือนระบบวัคซีน',
+        body: 'มีรายการนัดหมายหรือการติดตามวัคซีนที่ต้องดำเนินการ',
+        url: './index.html',
+        tag: 'vcc-push-general'
+    };
+
+    if (event.data) {
+        try {
+            const parsed = event.data.json();
+            payload = Object.assign(payload, parsed);
+        } catch (e) {
+            payload.body = event.data.text() || payload.body;
+        }
     }
+
+    const options = {
+        body: payload.body,
+        icon: payload.icon || './icons/icon-192.png',
+        badge: payload.badge || './icons/icon-192.png',
+        tag: payload.tag || 'vcc-push',
+        renotify: true,
+        requireInteraction: !!payload.requireInteraction,
+        vibrate: [200, 100, 200],
+        data: {
+            url: payload.url || './index.html'
+        }
+    };
+
+    event.waitUntil(
+        self.registration.showNotification(payload.title, options)
+    );
+});
+
+// 5. Notification Click Event: กดแจ้งเตือนแล้วเปิดหน้าเป้าหมายทันที
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const targetUrl = (event.notification.data && event.notification.data.url) ? event.notification.data.url : './index.html';
+
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+            for (const client of clientList) {
+                if (client.url && 'focus' in client) {
+                    if (targetUrl.includes('#') && 'navigate' in client) {
+                        client.navigate(targetUrl).catch(() => {});
+                    }
+                    return client.focus();
+                }
+            }
+            if (clients.openWindow) {
+                return clients.openWindow(targetUrl);
+            }
+        })
+    );
 });
