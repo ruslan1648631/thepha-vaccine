@@ -5072,6 +5072,9 @@
                     <button id="pwaInstallBtn" class="action-btn" title="ติดตั้งแอป VCC ลงเครื่อง" onclick="triggerPwaInstall()" style="display:none; color:#0284c7; background:#e0f2fe; font-size:12px; font-weight:600; padding:5px 12px; border-radius:8px; border:1px solid #bae6fd; cursor:pointer; align-items:center; gap:6px; margin-right:8px; transition:all 0.2s ease;">
                         <i class="fas fa-download"></i> <span>ติดตั้งแอป</span>
                     </button>
+                    <button id="pwaPushBtn" class="action-btn" title="ตั้งค่าการแจ้งเตือน (Web Push)" onclick="openPwaPushSettingsModal()" style="color:#64748b; background:#f1f5f9; font-size:12px; font-weight:600; padding:5px 11px; border-radius:8px; border:1px solid #cbd5e1; cursor:pointer; display:inline-flex; align-items:center; gap:5px; margin-right:8px; transition:all 0.2s ease;">
+                        <i class="fas fa-bell"></i> <span id="pwaPushBtnLabel">แจ้งเตือน</span>
+                    </button>
                     <button class="action-btn" title="เปลี่ยนสีธีม" onclick="openThemePicker()" style="color: #64748b; font-size: 18px; margin-right: 10px;">
                         <i class="fas fa-palette"></i>
                     </button>
@@ -33413,9 +33416,12 @@ window.exportDtpBySchoolExcel = async function() {
     // D. ลงทะเบียน Service Worker และตรวจสอบเวอร์ชันอัปเดต
     if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js?v=1.0', { scope: './' })
+            navigator.serviceWorker.register('./sw.js?v=1.1', { scope: './' })
                 .then(reg => {
                     console.log('✅ VCC Service Worker ลงทะเบียนสำเร็จ Scope:', reg.scope);
+                    if (typeof updatePwaPushButtonUI === 'function') {
+                        setTimeout(updatePwaPushButtonUI, 300);
+                    }
 
                     // ตรวจจับเมื่อมี Service Worker ตัวใหม่รออัปเดต
                     reg.addEventListener('updatefound', () => {
@@ -33502,6 +33508,287 @@ window.exportDtpBySchoolExcel = async function() {
             });
         }
     });
+
+    // G. ระบบจัดการ True Web Push Notification (PWA)
+    const VCC_VAPID_PUBLIC_KEY = 'BC-6rlvIFHLo6N0HvaqM8rlna2U7Ok7qeHGzk27TWuLZa8GzYde2N2iFGXL1hRfThwSJw87BThTCi4sbzC3o1EM';
+
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
+    async function getCurrentPushSubscription() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+        try {
+            const reg = await navigator.serviceWorker.ready;
+            return await reg.pushManager.getSubscription();
+        } catch (e) {
+            return null;
+        }
+    }
+
+    window.updatePwaPushButtonUI = async function() {
+        const btn = document.getElementById('pwaPushBtn');
+        const lbl = document.getElementById('pwaPushBtnLabel');
+        if (!btn) return;
+        const sub = await getCurrentPushSubscription();
+        if (sub && Notification.permission === 'granted') {
+            btn.style.background = '#dcfce7';
+            btn.style.color = '#15803d';
+            btn.style.borderColor = '#86efac';
+            if (lbl) lbl.textContent = 'เปิดแจ้งเตือนแล้ว';
+        } else if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+            btn.style.background = '#fee2e2';
+            btn.style.color = '#b91c1c';
+            btn.style.borderColor = '#fca5a5';
+            if (lbl) lbl.textContent = 'ถูกบล็อกแจ้งเตือน';
+        } else {
+            btn.style.background = '#f1f5f9';
+            btn.style.color = '#475569';
+            btn.style.borderColor = '#cbd5e1';
+            if (lbl) lbl.textContent = 'แจ้งเตือน';
+        }
+    };
+
+    async function upsertPushSubscriptionToSupabase(sub, prefs) {
+        if (!supabaseClient || !sub) return;
+        const json = sub.toJSON();
+        const u = APP.currentUser || {};
+        const payload = {
+            endpoint: json.endpoint,
+            p256dh: (json.keys && json.keys.p256dh) || '',
+            auth: (json.keys && json.keys.auth) || '',
+            username: u.username || '-',
+            fullname: u.fullname || u.name || '-',
+            role: u.role || 'เจ้าหน้าที่',
+            hcode: u.hcode || '-',
+            village: u.village || '-',
+            subdistrict: u.subdistrict || '-',
+            notify_appt: prefs.notify_appt !== false,
+            notify_dtp: prefs.notify_dtp !== false,
+            notify_missed: prefs.notify_missed !== false,
+            user_agent: navigator.userAgent.slice(0, 250),
+            updated_at: new Date().toISOString()
+        };
+        const { error } = await supabaseClient
+            .from('push_subscriptions')
+            .upsert(payload, { onConflict: 'endpoint' });
+        if (error) throw error;
+    }
+
+    window.openPwaPushSettingsModal = async function() {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+        const supported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+
+        if (!supported) {
+            return Swal.fire({
+                icon: 'info',
+                title: 'อุปกรณ์ยังไม่รองรับ Web Push',
+                html: isIOS && !isStandalone
+                    ? '<div style="text-align:left;font-size:13.5px;line-height:1.7;">สำหรับ <b>iPhone / iPad (iOS 16.4+)</b> กรุณา:<br>1. กดปุ่ม <b>แชร์ (Share)</b> ด้านล่างของ Safari<br>2. เลือก <b>"เพิ่มไปยังหน้าจอโฮม" (Add to Home Screen)</b><br>3. เปิดแอป VCC จากหน้าจอโฮม แล้วกดปุ่มแจ้งเตือนอีกครั้งครับ</div>'
+                    : 'เบราว์เซอร์นี้ยังไม่รองรับ Web Push Notification (แนะนำใช้ Google Chrome / Microsoft Edge หรือเปิดผ่าน HTTPS)'
+            });
+        }
+
+        const existingSub = await getCurrentPushSubscription();
+        let savedPrefs = { notify_appt: true, notify_dtp: true, notify_missed: true };
+        if (existingSub && supabaseClient) {
+            try {
+                const { data } = await supabaseClient
+                    .from('push_subscriptions')
+                    .select('notify_appt, notify_dtp, notify_missed')
+                    .eq('endpoint', existingSub.endpoint)
+                    .limit(1);
+                if (data && data.length > 0) savedPrefs = data[0];
+            } catch (e) {}
+        }
+
+        const isAdmin = (typeof isAdminAmpurUser === 'function' && isAdminAmpurUser()) || (typeof isAdminHOSUser === 'function' && isAdminHOSUser());
+        const statusHtml = existingSub && Notification.permission === 'granted'
+            ? '<span style="background:#dcfce7;color:#15803d;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;"><i class="fas fa-check-circle"></i> เปิดใช้งานอยู่</span>'
+            : '<span style="background:#f1f5f9;color:#64748b;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;"><i class="fas fa-bell-slash"></i> ยังไม่ได้เปิดรับแจ้งเตือน</span>';
+
+        const res = await Swal.fire({
+            title: '<i class="fas fa-bell" style="color:#0284c7;"></i> ตั้งค่าการแจ้งเตือน PWA Push',
+            html: `
+                <div style="text-align:left;font-family:Kanit,sans-serif;font-size:13.5px;line-height:1.6;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;background:#f8fafc;padding:10px 12px;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:12px;">
+                        <span>สถานะอุปกรณ์นี้:</span>
+                        ${statusHtml}
+                    </div>
+                    <div style="font-weight:600;color:#1e293b;margin-bottom:8px;">เลือกหัวข้อที่ต้องการรับแจ้งเตือนอัตโนมัติ (07:30 น. ทุกวัน):</div>
+                    <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px;cursor:pointer;">
+                        <input type="checkbox" id="pushPrefAppt" ${savedPrefs.notify_appt !== false ? 'checked' : ''} style="width:16px;height:16px;accent-color:#0284c7;">
+                        <span><strong>📅 แจ้งเตือนนัดหมายพรุ่งนี้</strong><br><small style="color:#64748b;">สรุปจำนวนเด็กนัดรับวัคซีนวันพรุ่งนี้ในเขตรับผิดชอบ</small></span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px;cursor:pointer;">
+                        <input type="checkbox" id="pushPrefDtp" ${savedPrefs.notify_dtp !== false ? 'checked' : ''} style="width:16px;height:16px;accent-color:#dc2626;">
+                        <span><strong>🚨 สรุปแผนเร่งรัดวัคซีนคอตีบ (DTP) ประจำวัน</strong><br><small style="color:#64748b;">แจ้งเตือนยอดเด็กค้างฉีด DTP1–DTP5 ที่ต้องเร่งรัดติดตาม</small></span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;cursor:pointer;">
+                        <input type="checkbox" id="pushPrefMissed" ${savedPrefs.notify_missed !== false ? 'checked' : ''} style="width:16px;height:16px;accent-color:#f59e0b;">
+                        <span><strong>⚠️ แจ้งเตือนเด็กขาดนัดรับวัคซีน</strong><br><small style="color:#64748b;">แจ้งเตือนจำนวนเด็กขาดนัดวัคซีนตามเกณฑ์อายุ</small></span>
+                    </label>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                        <button type="button" onclick="testLocalPushNotification()" style="flex:1;padding:7px 10px;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">
+                            <i class="fas fa-vial"></i> ทดสอบเด้งแจ้งเตือนบนเครื่องนี้
+                        </button>
+                        ${isAdmin ? `
+                        <button type="button" onclick="sendBroadcastPushFromAdmin()" style="flex:1;padding:7px 10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">
+                            <i class="fas fa-paper-plane"></i> ส่ง Push ถึงทุกเครื่อง (Edge Function)
+                        </button>` : ''}
+                    </div>
+                </div>
+            `,
+            showCancelButton: true,
+            showDenyButton: !!existingSub,
+            confirmButtonText: existingSub ? '<i class="fas fa-save"></i> บันทึกการตั้งค่า' : '<i class="fas fa-bell"></i> เปิดรับการแจ้งเตือน',
+            denyButtonText: '<i class="fas fa-bell-slash"></i> ปิดแจ้งเตือน',
+            cancelButtonText: 'ปิดหน้าต่าง',
+            confirmButtonColor: '#0284c7',
+            denyButtonColor: '#ef4444',
+            preConfirm: () => ({
+                notify_appt: document.getElementById('pushPrefAppt').checked,
+                notify_dtp: document.getElementById('pushPrefDtp').checked,
+                notify_missed: document.getElementById('pushPrefMissed').checked
+            })
+        });
+
+        if (res.isDenied) {
+            await unsubscribePwaPush();
+        } else if (res.isConfirmed) {
+            await subscribePwaPush(res.value);
+        }
+    };
+
+    window.subscribePwaPush = async function(prefs) {
+        try {
+            showLoading('กำลังตั้งค่าการแจ้งเตือน...');
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                hideLoading();
+                updatePwaPushButtonUI();
+                return Swal.fire('ไม่อนุญาตการแจ้งเตือน', 'กรุณากดอนุญาต (Allow) การแจ้งเตือนในตั้งค่าเบราว์เซอร์เพื่อรับ Web Push', 'warning');
+            }
+            const reg = await navigator.serviceWorker.ready;
+            let sub = await reg.pushManager.getSubscription();
+            if (!sub) {
+                sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(VCC_VAPID_PUBLIC_KEY)
+                });
+            }
+            await upsertPushSubscriptionToSupabase(sub, prefs || { notify_appt: true, notify_dtp: true, notify_missed: true });
+            hideLoading();
+            updatePwaPushButtonUI();
+            Swal.fire({ icon: 'success', title: 'เปิดรับการแจ้งเตือนสำเร็จ!', text: 'ระบบจะแจ้งเตือนนัดหมายพรุ่งนี้, สรุป DTP และเด็กขาดนัดให้อัตโนมัติ', timer: 2500, showConfirmButton: false });
+        } catch (err) {
+            hideLoading();
+            console.error('subscribePwaPush error:', err);
+            Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถเปิดรับแจ้งเตือนได้: ' + (err.message || err), 'error');
+        }
+    };
+
+    window.unsubscribePwaPush = async function() {
+        try {
+            showLoading('กำลังปิดการแจ้งเตือน...');
+            const sub = await getCurrentPushSubscription();
+            if (sub) {
+                if (supabaseClient) {
+                    await supabaseClient.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+                }
+                await sub.unsubscribe();
+            }
+            hideLoading();
+            updatePwaPushButtonUI();
+            Swal.fire({ icon: 'info', title: 'ปิดการแจ้งเตือนแล้ว', timer: 1800, showConfirmButton: false });
+        } catch (err) {
+            hideLoading();
+            Swal.fire('ผิดพลาด', err.message, 'error');
+        }
+    };
+
+    window.testLocalPushNotification = async function() {
+        try {
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                return Swal.fire('แจ้งเตือน', 'กรุณากดอนุญาตการแจ้งเตือนก่อนทดสอบ', 'warning');
+            }
+            const reg = await navigator.serviceWorker.ready;
+            await reg.showNotification('🔔 ทดสอบแจ้งเตือน VCC เทพา', {
+                body: 'ระบบพร้อมรับการแจ้งเตือนนัดหมายพรุ่งนี้, แผนเร่งรัด DTP และเด็กขาดนัดแล้ว',
+                icon: './icons/icon-192.png',
+                badge: './icons/icon-192.png',
+                tag: 'vcc-test-push',
+                vibrate: [200, 100, 200],
+                data: { url: './index.html#dtpReport' }
+            });
+        } catch (err) {
+            Swal.fire('ทดสอบไม่สำเร็จ', err.message, 'error');
+        }
+    };
+
+    window.sendBroadcastPushFromAdmin = async function() {
+        const { value: formVal } = await Swal.fire({
+            title: 'ส่ง Web Push ทันที (Admin)',
+            html: `
+                <div style="text-align:left;font-size:13px;">
+                    <label style="font-weight:600;">ประเภทการแจ้งเตือน</label>
+                    <select id="adminPushType" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;margin-bottom:10px;">
+                        <option value="appt">📅 แจ้งเตือนนัดหมายพรุ่งนี้</option>
+                        <option value="dtp">🚨 สรุปแผนเร่งรัดวัคซีนคอตีบ (DTP)</option>
+                        <option value="missed">⚠️ แจ้งเตือนเด็กขาดนัดรับวัคซีน</option>
+                        <option value="general">📢 ประกาศทั่วไป</option>
+                    </select>
+                    <label style="font-weight:600;">หัวข้อแจ้งเตือน</label>
+                    <input id="adminPushTitle" value="แจ้งเตือนติดตามวัคซีน — อ.เทพา" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;margin-bottom:10px;">
+                    <label style="font-weight:600;">ข้อความ</label>
+                    <textarea id="adminPushMsg" rows="3" placeholder="พิมพ์ข้อความแจ้งเตือน..." style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;"></textarea>
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: 'ส่ง Push ทันที',
+            cancelButtonText: 'ยกเลิก',
+            preConfirm: () => ({
+                alertType: document.getElementById('adminPushType').value,
+                title: document.getElementById('adminPushTitle').value.trim(),
+                message: document.getElementById('adminPushMsg').value.trim()
+            })
+        });
+        if (!formVal || !formVal.message) return;
+
+        const targetUrlMap = {
+            appt: './index.html#appointments',
+            dtp: './index.html#dtpReport',
+            missed: './index.html#missing',
+            general: './index.html'
+        };
+
+        showLoading('กำลังส่ง Web Push...');
+        try {
+            const { data, error } = await supabaseClient.functions.invoke('send-web-push', {
+                body: {
+                    title: formVal.title,
+                    message: formVal.message,
+                    alertType: formVal.alertType,
+                    url: targetUrlMap[formVal.alertType] || './index.html'
+                }
+            });
+            hideLoading();
+            if (error) throw error;
+            Swal.fire('ส่งสำเร็จ', `ส่งแจ้งเตือนสำเร็จ ${data.sent || 0} เครื่อง (ล้มเหลว ${data.failed || 0})`, 'success');
+        } catch (err) {
+            hideLoading();
+            Swal.fire('ไม่สามารถเรียก Edge Function ได้', 'กรุณาตรวจสอบว่าได้ Deploy Supabase Edge Function "send-web-push" และตั้งค่า VAPID Secrets แล้ว (' + err.message + ')', 'warning');
+        }
+    };
 </script>
 
 <!-- Mini Appointment Slip Dedicated Print Container -->
